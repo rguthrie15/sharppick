@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>SharpPick — Pick Smarter</title>
+
+<!-- SEO & Social -->
+<meta name="description" content="Pick games against real ESPN odds, track your bankroll, battle friends in private leagues. Free sports pick'em with real analytics.">
+<meta name="theme-color" content="#080c10">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SharpPick">
+
+<!-- Open Graph -->
+<meta property="og:title" content="SharpPick — Pick Smarter">
+<meta property="og:description" content="Pick games against real ESPN odds, track your bankroll, and battle friends. Free sports pick'em with real analytics.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://og-image-sharppick.netlify.app/api/og">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://sharppick.netlify.app">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="SharpPick — Pick Smarter">
+<meta name="twitter:description" content="Pick games against real ESPN odds. Track your bankroll. Beat your friends.">
+<meta name="twitter:image" content="https://og-image-sharppick.netlify.app/api/og">
+
+<link rel="manifest" href="/manifest.json">
+
+<!-- Apple touch icon -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg viewBox='0 0 32 32' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='32' height='32' rx='6' fill='%23080c10'/%3E%3Cpath d='M6 5 L16 16 L6 27 L10 27 L20 16 L10 5 Z' fill='%2300e5ff'/%3E%3Cpath d='M12 5 L22 16 L12 27 L16 27 L26 16 L16 5 Z' fill='%2300e5ff' opacity='0.4'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%230a1420'/%3E%3Cstop offset='100%25' stop-color='%23080c10'/%3E%3C/linearGradient%3E%3ClinearGradient id='m' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%2300e5ff'/%3E%3Cstop offset='100%25' stop-color='%2300b8d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='512' height='512' rx='96' fill='url(%23bg)'/%3E%3Cg transform='translate(100,80)'%3E%3Cpath d='M0 50 L120 176 L0 302 L60 302 L180 176 L60 50 Z' fill='url(%23m)'/%3E%3Cpath d='M84 50 L204 176 L84 302 L144 302 L264 176 L144 50 Z' fill='url(%23m)' opacity='0.4'/%3E%3C/g%3E%3C/svg%3E">
+
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- NAME ENTRY MODAL -->
+<a href="#main-content" class="skip-link" style="position:absolute;top:-999px;left:-999px;background:var(--accent);color:#000;padding:8px 16px;border-radius:4px;font-family:'DM Mono',monospace;font-size:11px;z-index:9999;text-decoration:none;font-weight:700" onfocus="this.style.top='8px';this.style.left='8px'" onblur="this.style.top='-999px';this.style.left='-999px'">Skip to content</a>
+<div class="name-modal-overlay" id="nameModalOverlay">
+  <div class="name-modal-box" id="authBox" role="dialog" aria-label="Sign in to SharpPick" aria-modal="true">
+    <!-- AUTH TABS -->
+    <div class="auth-logo" style="display:flex;align-items:center;justify-content:center;gap:10px"><img src="assets/sharppick-mark.png" alt="SharpPick" width="30" height="30" style="border-radius:8px;box-shadow:0 0 0 1px rgba(0,229,255,.18)"/><span style="font-family:'Syne',sans-serif;font-weight:800;letter-spacing:-0.4px">Sharp<span style="color:var(--accent)">Pick</span></span></div>
+    <div class="auth-tagline">Pick smarter. Track everything. Beat your friends.</div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="authTabLogin" onclick="switchAuthTab('login')">SIGN IN</button>
+      <button class="auth-tab" id="authTabSignup" onclick="switchAuthTab('signup')">CREATE ACCOUNT</button>
+      <button class="auth-tab" id="authTabGuest" onclick="switchAuthTab('guest')">GUEST</button>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="authPanelLogin">
+      <form id="loginForm" onsubmit="submitLogin(); return false;">
+<input class="name-input" id="loginEmail" type="email" placeholder="Email address" autocomplete="email" name="email">
+      <input class="name-input" id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitLogin()" name="password">
+      <div class="name-error" id="loginError"></div>
+      <button class="name-submit-btn" onclick="submitLogin()">SIGN IN →</button>
+</form>
+
+      <button class="auth-magic-btn" onclick="submitMagicLink()">✉️ Email me a sign-in link</button>
+    </div>
+
+    <!-- SIGNUP -->
+    <div id="authPanelSignup" style="display:none">
+      <input class="name-input" id="signupName" type="text" placeholder="Display name" maxlength="24" autocomplete="username" name="username">
+      <form id="signupForm" onsubmit="submitSignup(); return false;">
+<input class="name-input" id="signupEmail" type="email" placeholder="Email address" autocomplete="email" name="email">
+      <input class="name-input" id="signupPassword" type="password" placeholder="Password (8+ chars)" autocomplete="new-password" onkeydown="if(event.key==='Enter')submitSignup()" name="password">
+      <div class="name-error" id="signupError"></div>
+      <button class="name-submit-btn" onclick="submitSignup()">CREATE ACCOUNT →</button>
+</form>
+
+    </div>
+
+    <!-- GUEST -->
+    <div id="authPanelGuest" style="display:none">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Play as a guest — picks stay on this device only. Create an account to sync across devices and compete on the leaderboard.</div>
+      <input class="name-input" id="guestName" type="text" placeholder="Pick a display name" maxlength="24" autocomplete="off" onkeydown="if(event.key==='Enter')submitGuest()">
+      <div class="name-error" id="guestError"></div>
+      <button class="name-submit-btn" onclick="submitGuest()">PLAY AS GUEST →</button>
+    </div>
+
+    <div id="authMessage" style="display:none;text-align:center;padding:16px;font-size:12px;color:#2ed573;line-height:1.5"></div>
+  </div>
+</div>
+
+<header>
+  <div class="hdr">
+    <div class="logo" style="font-size:18px;font-weight:800;letter-spacing:-0.3px;display:flex;align-items:center;gap:8px"><img src="assets/sharppick-mark.png" alt="SharpPick" width="24" height="24" style="border-radius:6px;box-shadow:0 0 0 1px rgba(0,229,255,.18)"/><span style="color:var(--accent)">Sharp</span><span>Pick</span></div>
+    <div class="mode-toggle" id="desktopNav">
+      <button class="mode-btn active" id="btnScores" onclick="setMode('scores')">Scores</button>
+      <button class="mode-btn" id="btnCalendar" onclick="setMode('calendar')">Calendar</button>
+      <button class="mode-btn" id="btnNews" onclick="setMode('news')">News</button>
+      <button class="mode-btn" id="btnContests" onclick="setMode('contests')">Pick'em</button>
+      <button class="mode-btn" id="btnLeaderboard" onclick="setMode('leaderboard')">Board</button>
+      <button class="mode-btn" id="btnAnalysis" onclick="setMode('analysis')">Analysis</button>
+      <button class="mode-btn" id="btnHistory" onclick="setMode('history')">History</button>
+      <button class="mode-btn" id="btnBattles" onclick="setMode('battles')">Battles</button>
+      <button class="mode-btn" id="btnTrends" onclick="setMode('trends')">Market</button>
+      <button class="mode-btn" id="btnFeed" onclick="setMode('feed')">Feed</button>
+      <button class="mode-btn" id="btnBracket" onclick="setMode('bracket')">Bracket</button>
+      <button class="mode-btn" id="btnPicks" onclick="openPanel()">Picks</button>
+    </div>
+    <div class="hdr-right">
+      <button onclick="toggleSearch()" title="Search" style="background:none;border:none;color:var(--muted);cursor:pointer;padding:5px 8px;font-size:17px;line-height:1;transition:color .15s" onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--muted)'">🔍</button>
+      <div class="user-chip" id="userChip" onclick="showUserMenu()" title="Change name" style="display:none">
+        <div class="user-chip-avatar" id="userChipAvatar">?</div>
+        <span class="user-chip-name" id="userChipName">—</span>
+      </div>
+      <div class="record-pill" onclick="openPanel()" title="View your picks">
+        <span class="rp-label">Record</span>
+        <span class="rp-val rp-w" id="hdrW">0</span>
+        <span style="color:var(--muted);font-size:12px">-</span>
+        <span class="rp-val rp-l" id="hdrL">0</span>
+        <span style="color:var(--muted);font-size:12px">-</span>
+        <span class="rp-val rp-p" id="hdrP">0</span>
+      </div>
+      <span class="live-badge">LIVE</span>
+      <span class="poll-indicator" id="pollInd">●●●</span>
+      <div class="refresh-ring" id="refreshRing"></div>
+      <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted)" id="lastUpdate">—</span>
+    </div>
+  </div>
+</header>
+
+<div class="ticker-wrap">
+  <div class="ticker-label">SCORES</div>
+  <div style="overflow:hidden;flex:1">
+    <div class="ticker-track" id="tickerTrack"><span class="ti">Loading…</span><span class="ti">Loading…</span></div>
+  </div>
+</div>
+
+<div class="tabs-wrap" id="tabsWrap"><div class="tabs" id="tabsCont"></div></div>
+
+<main id="mainContent">
+  <div id="appHero" class="landing-page">
+
+    <!-- SECTION 1: HERO -->
+    <section class="lp-hero">
+      <div class="lp-grid-bg"></div>
+      <div class="lp-hero-inner">
+        <div class="lp-hero-text">
+          <div class="lp-hero-badge">THE SPORTS INTELLIGENCE PLATFORM</div>
+          <h1 class="lp-h1">Train Your<br>Sports IQ.</h1>
+          <p class="lp-sub">Make smarter picks using real odds. Track your performance. Compete without risking money.</p>
+          <div class="lp-ctas">
+            <button class="lp-cta-primary" onclick="dismissHero()">Start Competing Free</button>
+            <button class="lp-cta-secondary" onclick="document.getElementById('lpHow').scrollIntoView({behavior:'smooth'})">See How It Works →</button>
+          </div>
+          <div class="lp-micro">No deposits. No gambling. Just skill.</div>
+        </div>
+        <div class="lp-hero-visual">
+          <div class="lp-mock">
+            <div class="lp-mock-header"><img src="assets/sharppick-mark.png" alt="SharpPick" width="18" height="18" style="border-radius:5px;box-shadow:0 0 0 1px rgba(0,229,255,.16)"/><span style="font-family:'Syne',sans-serif;font-weight:800;font-size:11px"><span style="color:#00e5ff">Sharp</span>Pick</span>
+              <span style="margin-left:auto;font-size:9px;color:#4a6070">LIVE</span>
+            </div>
+            <div class="lp-mock-stats">
+              <div class="lp-stat"><span class="lp-stat-val lp-count" data-target="67">0</span><span class="lp-stat-label">WIN %</span></div>
+              <div class="lp-stat"><span class="lp-stat-val" style="color:#2ed573">+$<span class="lp-count" data-target="2840">0</span></span><span class="lp-stat-label">P&L</span></div>
+              <div class="lp-stat"><span class="lp-stat-val lp-count" data-target="142">0</span><span class="lp-stat-label">PICKS</span></div>
+            </div>
+            <div class="lp-mock-card">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:9px;color:#00e5ff">● LIVE · 4th</span><span style="font-size:8px;color:#4a6070">NBA</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:11px">Celtics</span><span style="font-size:14px;font-weight:800;color:#fff">108</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="font-size:11px">Lakers</span><span style="font-size:14px;font-weight:800;color:#fff">102</span></div>
+              <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:6px">
+                <div style="flex:1;background:rgba(0,229,255,.12);border:1px solid rgba(0,229,255,.3);border-radius:4px;padding:4px;text-align:center;font-size:8px;color:#00e5ff">Celtics -3.5</div>
+                <div style="flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:4px;padding:4px;text-align:center;font-size:8px;color:#4a6070">Lakers +3.5</div>
+              </div>
+            </div>
+            <div class="lp-mock-card" style="opacity:.6">
+              <div style="display:flex;justify-content:space-between;margin-bottom:3px"><span style="font-size:11px">Chiefs</span><span style="font-size:14px;font-weight:800;color:#fff">24</span></div>
+              <div style="display:flex;justify-content:space-between"><span style="font-size:11px">Bills</span><span style="font-size:14px;font-weight:800;color:#fff">21</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: WHAT IS SHARPPICK -->
+    <section class="lp-section" id="lpHow">
+      <div class="lp-section-inner">
+        <div class="lp-section-label">WHAT IS SHARPPICK</div>
+        <h2 class="lp-h2">Everything you need to compete.</h2>
+        <div class="lp-features">
+          <div class="lp-feature">
+            <div class="lp-feature-icon">📊</div>
+            <h3>Real Odds Intelligence</h3>
+            <p>Live sportsbook-style odds and matchup data from ESPN. Make informed decisions, not blind guesses.</p>
+          </div>
+          <div class="lp-feature">
+            <div class="lp-feature-icon">📈</div>
+            <h3>Performance Analytics</h3>
+            <p>Track win rate, ROI, bankroll simulations, and trend accuracy. See exactly where you're sharp — and where you're not.</p>
+          </div>
+          <div class="lp-feature">
+            <div class="lp-feature-icon">🏆</div>
+            <h3>Competitive Leagues</h3>
+            <p>Create private leagues or climb the global leaderboard. Challenge friends and run full seasons.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: THE PROBLEM -->
+    <section class="lp-section lp-section-dark">
+      <div class="lp-section-inner" style="text-align:center;max-width:700px">
+        <h2 class="lp-h2">Most fans guess.<br><span style="color:var(--accent)">SharpPick trains skill.</span></h2>
+        <p class="lp-body">Anyone can have an opinion. SharpPick lets you put it on record — track every prediction, measure your edge, and prove who's actually sharp.</p>
+      </div>
+    </section>
+
+    <!-- SECTION 4: PRODUCT DEMO -->
+    <section class="lp-section">
+      <div class="lp-section-inner">
+        <div class="lp-section-label">THE PLATFORM</div>
+        <h2 class="lp-h2">See where you win.</h2>
+        <div class="lp-demo-grid">
+          <div class="lp-demo-card">
+            <div class="lp-demo-label">PICKS BOARD</div>
+            <div class="lp-demo-desc">Every game. Every line. Make your call.</div>
+          </div>
+          <div class="lp-demo-card">
+            <div class="lp-demo-label">PARLAY BUILDER</div>
+            <div class="lp-demo-desc">Stack picks. Multiply conviction.</div>
+          </div>
+          <div class="lp-demo-card">
+            <div class="lp-demo-label">LEADERBOARD</div>
+            <div class="lp-demo-desc">Outperform your friends. Climb the ranks.</div>
+          </div>
+          <div class="lp-demo-card">
+            <div class="lp-demo-label">ANALYTICS</div>
+            <div class="lp-demo-desc">Track what works. Cut what doesn't.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 5: SOCIAL -->
+    <section class="lp-section lp-section-dark">
+      <div class="lp-section-inner" style="text-align:center;max-width:700px">
+        <div class="lp-section-label" style="text-align:center">COMPETE</div>
+        <h2 class="lp-h2">Compete Without Risk.</h2>
+        <p class="lp-body">Challenge friends. Run seasons. Track who's actually sharp. No money changes hands — just bragging rights and cold, hard data.</p>
+        <button class="lp-cta-primary" style="margin-top:24px" onclick="dismissHero()">Create Your League →</button>
+      </div>
+    </section>
+
+    <!-- SECTION 6: TRUST -->
+    <section class="lp-section">
+      <div class="lp-section-inner" style="text-align:center;max-width:600px">
+        <div class="lp-section-label" style="text-align:center">TRUST & SAFETY</div>
+        <h2 class="lp-h2">Skill-Based. Not Gambling.</h2>
+        <div class="lp-trust-grid">
+          <div class="lp-trust-item">✕ No deposits</div>
+          <div class="lp-trust-item">✕ No withdrawals</div>
+          <div class="lp-trust-item">✕ No real-money betting</div>
+          <div class="lp-trust-item">✓ Data-driven competition</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="lp-section lp-section-final">
+      <div class="lp-section-inner" style="text-align:center">
+        <h2 class="lp-h2" style="font-size:clamp(28px,5vw,48px)">Ready to prove<br>you're sharp?</h2>
+        <button class="lp-cta-primary lp-cta-big" onclick="dismissHero()">Start Free →</button>
+        <div class="lp-micro" style="margin-top:16px">Join <span class="lp-count" data-target="500">0</span>+ pickers already competing.</div>
+      </div>
+    </section>
+
+  </div>
+  <div id="main-content" role="main">
+  <div id="scoresView">
+    <div class="cal-nav">
+      <button class="nav-btn" onclick="shiftWeek(-1)">&#8249;</button>
+      <div class="date-strip" id="dateStrip"></div>
+      <button class="nav-btn" onclick="shiftWeek(1)">&#8250;</button>
+    </div>
+    <div id="bankrollBar" class="bankroll-bar" style="display:none">
+      <span class="bankroll-icon">💰</span>
+      <span class="bankroll-label">BANKROLL</span>
+      <span class="bankroll-amount" id="bankrollDisplay">$1,000</span>
+      <span style="flex:1"></span>
+      <span id="bankrollPnL" style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted)"></span>
+    </div>
+    <div id="slateSummary" class="slate-summary"></div>
+    <div id="dailyChallengeWrap"></div>
+    <div id="bestBetWrap"></div>
+    <div id="injuryStrip" class="injury-strip"></div>
+    <div id="scoresGrid">
+      <div class="score-grid" id="skeletonGrid">
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;height:130px"><div class="sk" style="width:40%;height:9px;margin-bottom:12px"></div><div style="display:flex;gap:9px;align-items:center;margin-bottom:9px"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:55%;height:9px;margin-bottom:5px"></div></div><div class="sk" style="width:34px;height:20px"></div></div><div style="height:1px;background:var(--border);margin:5px 0"></div><div style="display:flex;gap:9px;align-items:center"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:50%;height:9px"></div></div><div class="sk" style="width:34px;height:20px"></div></div></div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;height:130px"><div class="sk" style="width:35%;height:9px;margin-bottom:12px"></div><div style="display:flex;gap:9px;align-items:center;margin-bottom:9px"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:60%;height:9px;margin-bottom:5px"></div></div><div class="sk" style="width:34px;height:20px"></div></div><div style="height:1px;background:var(--border);margin:5px 0"></div><div style="display:flex;gap:9px;align-items:center"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:45%;height:9px"></div></div><div class="sk" style="width:34px;height:20px"></div></div></div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;height:130px"><div class="sk" style="width:45%;height:9px;margin-bottom:12px"></div><div style="display:flex;gap:9px;align-items:center;margin-bottom:9px"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:50%;height:9px;margin-bottom:5px"></div></div><div class="sk" style="width:34px;height:20px"></div></div><div style="height:1px;background:var(--border);margin:5px 0"></div><div style="display:flex;gap:9px;align-items:center"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:55%;height:9px"></div></div><div class="sk" style="width:34px;height:20px"></div></div></div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;height:130px"><div class="sk" style="width:38%;height:9px;margin-bottom:12px"></div><div style="display:flex;gap:9px;align-items:center;margin-bottom:9px"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:65%;height:9px;margin-bottom:5px"></div></div><div class="sk" style="width:34px;height:20px"></div></div><div style="height:1px;background:var(--border);margin:5px 0"></div><div style="display:flex;gap:9px;align-items:center"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:48%;height:9px"></div></div><div class="sk" style="width:34px;height:20px"></div></div></div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;height:130px"><div class="sk" style="width:42%;height:9px;margin-bottom:12px"></div><div style="display:flex;gap:9px;align-items:center;margin-bottom:9px"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:52%;height:9px;margin-bottom:5px"></div></div><div class="sk" style="width:34px;height:20px"></div></div><div style="height:1px;background:var(--border);margin:5px 0"></div><div style="display:flex;gap:9px;align-items:center"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:58%;height:9px"></div></div><div class="sk" style="width:34px;height:20px"></div></div></div>
+        <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;height:130px"><div class="sk" style="width:33%;height:9px;margin-bottom:12px"></div><div style="display:flex;gap:9px;align-items:center;margin-bottom:9px"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:57%;height:9px;margin-bottom:5px"></div></div><div class="sk" style="width:34px;height:20px"></div></div><div style="height:1px;background:var(--border);margin:5px 0"></div><div style="display:flex;gap:9px;align-items:center"><div class="sk" style="width:28px;height:28px;border-radius:50%;flex-shrink:0"></div><div style="flex:1"><div class="sk" style="width:43%;height:9px"></div></div><div class="sk" style="width:34px;height:20px"></div></div></div>
+      </div>
+    </div>
+  </div>
+  <div id="calendarView" style="display:none">
+    <div class="month-hdr">
+      <div class="month-title" id="monthTitle"></div>
+      <div class="month-nav">
+        <button class="nav-btn" onclick="shiftMonth(-1)">&#8249;</button>
+        <button class="nav-btn" style="width:auto;padding:0 12px;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px" onclick="goToday()">TODAY</button>
+        <button class="nav-btn" onclick="shiftMonth(1)">&#8250;</button>
+      </div>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+  </div>
+  <div id="historyView" style="display:none">
+    <div id="historyContent"></div>
+  </div>
+  <div id="leaderboardView" style="display:none">
+    <div class="lb-page">
+      <div class="leagues-tab-row" style="padding:12px 12px 0">
+        <button class="leagues-tab active" id="lbTabGlobal" onclick="switchLbTab('global')">🌍 GLOBAL</button>
+        <button class="leagues-tab" id="lbTabLeagues" onclick="switchLbTab('leagues')">🏆 MY LEAGUES</button>
+      </div>
+      <div id="leaderboardContent"></div>
+      <div id="leaguesContent" style="display:none"></div>
+    </div>
+  </div>
+  <div id="trendsView" style="display:none">
+    <div class="trends-page" id="trendsContent"><div style="padding:20px;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px">Loading trends…</div></div>
+  </div>
+  <div id="myactionView" style="display:none">
+    <div id="myactionContent" style="padding:12px"></div>
+  </div>
+  <div id="battlesView" style="display:none">
+    <div style="padding:12px 12px 0;display:flex;align-items:center;justify-content:space-between">
+      <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--muted)">PICK BATTLES</div>
+      <button onclick="showNewBattleForm()" style="background:var(--accent);color:#000;border:none;border-radius:6px;padding:5px 12px;font-family:'DM Mono',monospace;font-size:9px;font-weight:700;cursor:pointer">+ CHALLENGE</button>
+    </div>
+    <div id="battlesContent" style="padding:12px"></div>
+  </div>
+  <div id="feedView" style="display:none">
+    <div style="display:flex;gap:6px;padding:12px 12px 0">
+      <div class="feed-tab active" id="feedTabAll" onclick="switchFeedTab('all')">ALL PICKS</div>
+      <div class="feed-tab" id="feedTabLeague" onclick="switchFeedTab('league')">MY PICKS</div>
+    </div>
+    <div class="feed-wrap" id="feedContent"></div>
+  </div>
+  <div id="bracketView" style="display:none">
+    <div class="bracket-page" id="bracketContent"></div>
+  </div>
+  <div id="newsView" style="display:none">
+    <div class="section-page" id="newsContent"></div>
+  </div>
+  <div id="analysisView" style="display:none">
+    <div class="section-page" id="analysisContent"></div>
+  </div>
+  <div id="contestsView" style="display:none">
+    <div class="section-page" id="contestsContent"></div>
+  </div>
+</main>
+
+<!-- ACHIEVEMENT TOAST -->
+<div class="ach-toast" id="achToast">
+  <div class="ach-toast-icon" id="achToastIcon">🏆</div>
+  <div class="ach-toast-text">Achievement unlocked: <span class="ach-toast-name" id="achToastName"></span></div>
+</div>
+
+<!-- MOBILE BOTTOM NAV -->
+<button class="parlay-fab" id="parlayFAB" onclick="openParlayPanel()" title="Parlay Builder">
+  🎰<span class="parlay-count-badge" id="parlayBadge">0</span>
+</button>
+
+<div class="parlay-panel" id="parlayPanel">
+  <div class="parlay-hdr">
+    <div class="parlay-title">🎰 Parlay Builder</div>
+    <button class="parlay-close" onclick="closeParlayPanel()">✕</button>
+  </div>
+  <div id="parlayLegsWrap"><div class="parlay-empty">Add 2–12 picks to build a parlay</div></div>
+  <div id="parlayOddsDisplay" class="parlay-odds-display" style="display:none"></div>
+  <button class="parlay-submit-btn" id="parlaySubmitBtn" onclick="submitParlay()" disabled>SUBMIT PARLAY</button>
+</div>
+
+</div><!-- end main-content -->
+<nav class="mobile-nav" id="mobileNav" role="navigation" aria-label="Primary navigation">
+  <div class="mobile-nav-inner">
+    <button class="mob-btn active" id="mobBtnScores" onclick="setMode('scores')">
+      <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>Scores</span>
+    </button>
+    <button class="mob-btn" id="mobBtnMyaction" onclick="setMode('myaction')">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="1.5"/><path d="M12 6v6l4 2" stroke-width="1.5"/></svg>
+      <span>My Action</span>
+    </button>
+    <button class="mob-btn" id="mobBtnLeaderboard" onclick="setMode('leaderboard')">
+      <svg viewBox="0 0 24 24"><rect x="18" y="3" width="3" height="18" rx="1"/><rect x="10.5" y="8" width="3" height="13" rx="1"/><rect x="3" y="13" width="3" height="8" rx="1"/></svg>
+      <span>Board</span>
+    </button>
+    <button class="mob-btn" id="mobBtnPicks" onclick="openPanel()">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="9 12 11 14 15 10"/></svg>
+      <span id="mobPicksBadgeWrap">Picks<span class="mob-badge" id="mobPicksBadge" style="display:none">0</span></span>
+    </button>
+    <button class="mob-btn" id="mobBtnMore" onclick="openMoreDrawer()">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+      <span>More</span>
+    </button>
+  </div>
+</nav>
+
+<!-- GAME DETAIL MODAL -->
+<div class="modal-overlay" id="modalOverlay" role="dialog" aria-label="Game details" aria-modal="true" onclick="handleModalOverlayClick(event)">
+  <div class="modal" id="gameModal">
+    <div class="modal-score-hdr" id="modalScoreHdr">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <div class="modal-league" id="modalLeague"></div>
+      <div class="modal-teams">
+        <div class="modal-team" id="modalAwayTeam"></div>
+        <div class="modal-score-center">
+          <div class="modal-scores">
+            <div class="modal-score-num" id="modalAwayScore"></div>
+            <div class="modal-score-dash">—</div>
+            <div class="modal-score-num" id="modalHomeScore"></div>
+          </div>
+          <div class="modal-status" id="modalStatus"></div>
+        </div>
+        <div class="modal-team" id="modalHomeTeam"></div>
+      </div>
+    </div>
+    <div class="modal-tabs" id="modalTabs"></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- PICKS PANEL -->
+<div class="panel-overlay" id="panelOverlay" onclick="closePanel()"></div>
+<div class="picks-panel" id="picksPanel" role="dialog" aria-label="My Picks" aria-modal="true">
+  <div class="panel-hdr">
+    <div class="panel-title" style="display:flex;align-items:center;gap:8px">🎯 My Picks<button onclick="syncPicksFromServer(true)" title="Sync from server" style="background:none;border:none;color:var(--dim);cursor:pointer;font-size:14px;line-height:1;padding:0;font-weight:normal">⟳</button></div>
+    <button class="panel-close" onclick="closePanel()">✕</button>
+  </div>
+  <!-- Always-visible breakdown by bet type -->
+  <div class="record-breakdown" id="recordBreakdown"></div>
+  <!-- Filter tabs -->
+  <div class="pick-cat-bar">
+    <button class="pick-cat-tab active" data-cat="all"    onclick="setPickCat('all')">All</button>
+    <button class="pick-cat-tab"        data-cat="spread" onclick="setPickCat('spread')">Spread</button>
+    <button class="pick-cat-tab"        data-cat="total"  onclick="setPickCat('total')">O/U</button>
+    <button class="pick-cat-tab"        data-cat="prop"   onclick="setPickCat('prop')">Props</button>
+  </div>
+  <div class="panel-picks" id="panelPicksList"></div>
+  <div class="panel-footer">
+    <button class="clear-btn" onclick="clearAllPicks()">CLEAR ALL PICKS</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
