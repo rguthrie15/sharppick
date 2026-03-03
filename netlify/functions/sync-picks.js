@@ -9,11 +9,11 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const json = (statusCode, body, extraHeaders = {}) => ({
   statusCode,
   headers: {
-    'content-type': 'application/json; charset=utf-8',
+    "content-type": "application/json; charset=utf-8",
     // CORS (same-origin on Netlify, but keep permissive for safety)
-    'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'content-type, authorization',
-    'access-control-allow-methods': 'POST, OPTIONS',
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type, authorization",
+    "access-control-allow-methods": "POST, OPTIONS",
     ...extraHeaders,
   },
   body: JSON.stringify(body),
@@ -22,6 +22,14 @@ const json = (statusCode, body, extraHeaders = {}) => ({
 function toNum(v, d = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
+}
+
+// Converts an ISO/timestamp string OR number into epoch milliseconds (bigint-friendly)
+function toEpochMs(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return v; // already epoch ms
+  const n = Date.parse(v); // parse ISO string
+  return Number.isFinite(n) ? n : null;
 }
 
 function profitFromOdds(risk, odds) {
@@ -33,9 +41,10 @@ function profitFromOdds(risk, odds) {
 }
 
 function pickMadeAt(p) {
-  const t = p?.created_at || p?.madeAt || p?.createdAt || p?.ts;
+  // Prefer bigint made_at, but allow legacy fields
+  const t = p?.made_at ?? p?.created_at ?? p?.madeAt ?? p?.createdAt ?? p?.ts;
   if (!t) return 0;
-  if (typeof t === 'string') {
+  if (typeof t === "string") {
     const n = Date.parse(t);
     return Number.isFinite(n) ? n : 0;
   }
@@ -43,11 +52,11 @@ function pickMadeAt(p) {
 }
 
 function pickResult(p) {
-  return String(p?.result || p?.status || 'pending').toLowerCase();
+  return String(p?.result || p?.status || "pending").toLowerCase();
 }
 
 function pickIsParlay(p) {
-  return Boolean(p?.is_parlay) || p?.pick_type === 'parlay' || Array.isArray(p?.legs);
+  return Boolean(p?.is_parlay) || p?.pick_type === "parlay" || Array.isArray(p?.legs) || Array.isArray(p?.parlay_legs);
 }
 
 function computeStreak(settledDesc) {
@@ -55,8 +64,8 @@ function computeStreak(settledDesc) {
   let n = 0;
   for (const p of settledDesc) {
     const r = pickResult(p);
-    if (r === 'push' || r === 'canceled') continue;
-    const d = r === 'won' ? 'W' : r === 'lost' ? 'L' : null;
+    if (r === "push" || r === "canceled") continue;
+    const d = r === "won" ? "W" : r === "lost" ? "L" : null;
     if (!d) continue;
     if (!dir) {
       dir = d;
@@ -67,7 +76,7 @@ function computeStreak(settledDesc) {
       break;
     }
   }
-  return dir ? `${dir}${n}` : '—';
+  return dir ? `${dir}${n}` : "—";
 }
 
 function computeRatingsFromRows(rows) {
@@ -84,35 +93,41 @@ function computeRatingsFromRows(rows) {
       risk = 0,
       profit = 0,
       decided = 0;
+
     for (const pk of list) {
       const r = pickResult(pk);
-      if (r === 'pending') {
+
+      if (r === "pending") {
         pend++;
         continue;
       }
-      if (r === 'canceled') continue;
+      if (r === "canceled") continue;
+
       const rk = toNum(pk?.risk ?? pk?.wager ?? 50, 50);
       const od = toNum(pk?.odds ?? -110, -110);
-      if (r === 'won') {
+
+      if (r === "won") {
         w++;
         decided++;
         risk += rk;
         profit += profitFromOdds(rk, od);
-      } else if (r === 'lost') {
+      } else if (r === "lost") {
         l++;
         decided++;
         risk += rk;
         profit -= rk;
-      } else if (r === 'push') {
+      } else if (r === "push") {
         push++;
         decided++;
         risk += rk;
       }
     }
+
     const denom = w + l || 1;
     const winRate = (w / denom) * 100;
     const roi = risk ? (profit / risk) * 100 : 0;
     const units = profit / 50;
+
     return { w, l, push, pend, decided, risk, profit, winRate, roi, units };
   }
 
@@ -128,9 +143,10 @@ function computeRatingsFromRows(rows) {
   const last10 = singlesAll
     .filter((p) => {
       const r = pickResult(p);
-      return r !== 'pending' && r !== 'canceled';
+      return r !== "pending" && r !== "canceled";
     })
     .slice(0, 10);
+
   const avgOddsLast10 = last10.length
     ? Math.round(last10.reduce((s, p) => s + toNum(p?.odds ?? -110, -110), 0) / last10.length)
     : null;
@@ -138,8 +154,8 @@ function computeRatingsFromRows(rows) {
   const byLeague = {};
   for (const pk of singles90) {
     const r = pickResult(pk);
-    if (r === 'pending' || r === 'canceled') continue;
-    const lg = pk?.league || pk?.sport || 'other';
+    if (r === "pending" || r === "canceled") continue;
+    const lg = pk?.league || pk?.sport || "other";
     byLeague[lg] = (byLeague[lg] || 0) + 1;
   }
   const topSport = Object.entries(byLeague).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
@@ -156,7 +172,7 @@ function computeRatingsFromRows(rows) {
   const settledSinglesDesc = singlesAll
     .filter((p) => {
       const r = pickResult(p);
-      return r !== 'pending' && r !== 'canceled';
+      return r !== "pending" && r !== "canceled";
     })
     .sort((a, b) => pickMadeAt(b) - pickMadeAt(a));
 
@@ -181,9 +197,9 @@ function computeRatingsFromRows(rows) {
   };
 }
 
-async function supa(path, { method = 'GET', headers = {}, body } = {}) {
+async function supa(path, { method = "GET", headers = {}, body } = {}) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
   const url = `${SUPABASE_URL}${path}`;
   const res = await fetch(url, {
@@ -195,6 +211,7 @@ async function supa(path, { method = 'GET', headers = {}, body } = {}) {
     },
     body,
   });
+
   const text = await res.text();
   let data;
   try {
@@ -202,8 +219,9 @@ async function supa(path, { method = 'GET', headers = {}, body } = {}) {
   } catch {
     data = text;
   }
+
   if (!res.ok) {
-    const msg = typeof data === 'string' ? data : data?.message || data?.error || res.statusText;
+    const msg = typeof data === "string" ? data : data?.message || data?.error || res.statusText;
     const err = new Error(msg);
     err.status = res.status;
     err.data = data;
@@ -213,7 +231,7 @@ async function supa(path, { method = 'GET', headers = {}, body } = {}) {
 }
 
 async function verifyUser(accessToken) {
-  // Verify via Supabase Auth API
+  // Verify via Supabase Auth API (use the user's access token)
   const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -225,36 +243,52 @@ async function verifyUser(accessToken) {
 }
 
 exports.handler = async (event) => {
-  if (event.httpMethod === 'OPTIONS') return json(204, {});
-  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' });
+  if (event.httpMethod === "OPTIONS") return json(204, {});
+  if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
   try {
-    const auth = event.headers.authorization || event.headers.Authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    if (!token) return json(401, { error: 'Missing Bearer token' });
+    const auth = event.headers.authorization || event.headers.Authorization || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
+    if (!token) return json(401, { error: "Missing Bearer token" });
 
     const user = await verifyUser(token);
-    if (!user?.id) return json(401, { error: 'Invalid session' });
+    if (!user?.id) return json(401, { error: "Invalid session" });
 
-    const payload = JSON.parse(event.body || '{}');
+    const payload = JSON.parse(event.body || "{}");
     const picks = Array.isArray(payload.picks) ? payload.picks : [];
-    const name = String(payload.name || payload.displayName || payload.email || '').slice(0, 80);
+    const name = String(payload.name || payload.displayName || payload.email || "").slice(0, 80);
 
-    // Upsert picks (force user_id)
+    // Upsert picks (force user_id) + normalize bigint timestamps
     if (picks.length) {
+      const nowMs = Date.now();
+
       const rows = picks
         .filter((r) => r && r.id)
-        .map((r) => ({
-          ...r,
-          user_id: user.id,
-        }));
+        .map((r) => {
+          const made = r.made_at ?? r.madeAt ?? r.created_at ?? r.createdAt ?? r.ts;
+          const settled = r.settled_at ?? r.settledAt ?? r.settled_on ?? r.settledOn;
+          const updated = r.updated_at ?? r.updatedAt ?? r.updated_on ?? r.updatedOn;
+
+          // Avoid accidentally pushing created_at strings into Supabase
+          const { created_at, ...rest } = r;
+
+          return {
+            ...rest,
+            user_id: user.id,
+
+            // BIGINT columns MUST be epoch ms
+            made_at: toEpochMs(made) ?? nowMs,
+            settled_at: toEpochMs(settled),
+            updated_at: toEpochMs(updated) ?? nowMs,
+          };
+        });
 
       if (rows.length) {
         await supa(`/rest/v1/user_picks?on_conflict=id`, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'content-type': 'application/json',
-            Prefer: 'resolution=merge-duplicates',
+            "content-type": "application/json",
+            Prefer: "resolution=merge-duplicates",
           },
           body: JSON.stringify(rows),
         });
@@ -262,29 +296,33 @@ exports.handler = async (event) => {
     }
 
     // Pull authoritative rows and recompute ratings
-    const userRows = await supa(`/rest/v1/user_picks?select=*&user_id=eq.${user.id}&order=created_at.desc&limit=5000`);
+    const userRows = await supa(
+      `/rest/v1/user_picks?select=*&user_id=eq.${user.id}&order=made_at.desc&limit=5000`
+    );
+
     const stats = computeRatingsFromRows(userRows);
     const calculated_at = new Date().toISOString();
 
     // Upsert into user_ratings (snapshot)
     const ratingRow = { user_id: user.id, calculated_at, ...stats };
+
     await supa(`/rest/v1/user_ratings?on_conflict=user_id`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'content-type': 'application/json',
-        Prefer: 'resolution=merge-duplicates',
+        "content-type": "application/json",
+        Prefer: "resolution=merge-duplicates",
       },
       body: JSON.stringify([ratingRow]),
     });
 
-    // Also keep a name map in leaderboard table (best-effort)
+    // Optional: keep a name map in leaderboard table (best-effort)
     if (name) {
       try {
         await supa(`/rest/v1/leaderboard?on_conflict=user_id`, {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'content-type': 'application/json',
-            Prefer: 'resolution=merge-duplicates',
+            "content-type": "application/json",
+            Prefer: "resolution=merge-duplicates",
           },
           body: JSON.stringify([{ user_id: user.id, name, updated_at: calculated_at }]),
         });
@@ -295,6 +333,6 @@ exports.handler = async (event) => {
 
     return json(200, { ok: true, user_id: user.id, stats });
   } catch (e) {
-    return json(500, { error: e?.message || 'Server error' });
+    return json(500, { error: e?.message || "Server error" });
   }
 };
