@@ -7480,7 +7480,6 @@ async function syncPicksFromServer(showIndicator = false) {
 
 // ─────────────────────────────────────────────────────────────
 // Realtime listener for picks (refresh UI when DB changes)
-// ─────────────────────────────────────────────────────────────
 let picksRealtimeSub = null;
 
 function startPicksRealtime() {
@@ -7500,14 +7499,20 @@ function startPicksRealtime() {
           table: 'user_picks',
           filter: `user_id=eq.${currentUser.id}`
         },
-        async () => {
+        async (payload) => {
+          console.log('Realtime user_picks event:', payload);
+
           await syncPicksFromServer(false);
+
           renderPicksPanel();
           updateRecordUI();
           renderScores?.();
+          renderHistoryView?.();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Realtime subscription status:', status);
+      });
   } catch (e) {
     console.warn('Realtime error:', e?.message || e);
   }
@@ -7517,8 +7522,6 @@ function stopPicksRealtime() {
   try { picksRealtimeSub?.unsubscribe?.(); } catch {}
   picksRealtimeSub = null;
 }
- 
-
 // ═══════════════════════════════════════════════════════
 // APP HERO
 // ═══════════════════════════════════════════════════════
