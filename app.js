@@ -7514,8 +7514,11 @@ function startPicksRealtime() {
         }
       )
       .subscribe((status) => {
-        console.log('Realtime subscription status:', status);
-      });
+  console.log('Realtime subscription status:', status);
+  if (status === 'SUBSCRIBED') {
+    console.log('✅ Realtime is live for user_picks');
+  }
+});
   } catch (e) {
     console.warn('Realtime error:', e?.message || e);
   }
