@@ -16,7 +16,7 @@ const LEAGUES = [
   {sport:'soccer',    league:'uefa.champions',         label:'UCL ⚽',       dot:'soccer', oddsKey:'soccer_uefa_champs_league'},
   {sport:'soccer',    league:'esp.1',                  label:'La Liga ⚽',   dot:'soccer', oddsKey:'soccer_spain_la_liga'},
   {sport:'soccer',    league:'ger.1',                  label:'Bundesliga ⚽',dot:'soccer', oddsKey:'soccer_germany_bundesliga'},
-  {sport:'soccer',    league:'ita.1',                  label:'Serie A ⚽',   dot:'soccer', oddsKey:'soccer_italy_serie_a'},
+  {sport:'soccer',    lefague:'ita.1',                  label:'Serie A ⚽',   dot:'soccer', oddsKey:'soccer_italy_serie_a'},
 ];
 // ═══════════════════════════════════════════════════════
 // EARLY GLOBALS (must be defined before any init/timers)
@@ -2284,17 +2284,6 @@ async function renderLeaderboardPro(){
   `;
 
   el.innerHTML = header + table;
-}
-  // Fallback: localStorage
-  const entries=[];
-  try{
-    for(let i=0;i<localStorage.length;i++){
-      const k=localStorage.key(i);
-      if(!k||!k.startsWith('lb:')) continue;
-      try{ const v=localStorage.getItem(k); if(v) entries.push(JSON.parse(v)); }catch{}
-    }
-  }catch{}
-  return entries;
 }
 
 function buildPickHTML(g){
