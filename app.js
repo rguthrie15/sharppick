@@ -7168,25 +7168,21 @@ function showOnboarding(){
   document.body.appendChild(modal);
 }
 
-
-
-// ═══════════════════════════════════════════════════════
 // PICK SYNC — Supabase ↔ localStorage
 // ═══════════════════════════════════════════════════════
 let syncInProgress = false;
 let lastSyncAt = 0;
-const SYNC_THROTTLE_MS = 5000; // don't sync more than once per 5s
+const SYNC_THROTTLE_MS = 5000;
 
-// Convert local pick → Supabase row
-
+// Normalize results
 function normalizeResult(res){
   const r = String(res||'').toLowerCase().trim();
   if(!r) return 'pending';
-  if(r==='pending' || r==='open' || r==='unsettled') return 'pending';
-  if(r==='won' || r==='win' || r==='w') return 'won';
-  if(r==='lost' || r==='loss' || r==='l') return 'lost';
-  if(r==='push' || r==='pushed' || r==='p') return 'push';
-  if(r==='void' || r==='canceled' || r==='cancelled' || r==='cancel') return 'push';
+  if(['pending','open','unsettled'].includes(r)) return 'pending';
+  if(['won','win','w'].includes(r)) return 'won';
+  if(['lost','loss','l'].includes(r)) return 'lost';
+  if(['push','pushed','p'].includes(r)) return 'push';
+  if(['void','canceled','cancelled','cancel'].includes(r)) return 'push';
   return 'pending';
 }
 
@@ -7196,18 +7192,38 @@ function normalizeAllPicksInPlace(){
   for(const p of picks){
     const nr = normalizeResult(p.result);
     if(p.result!==nr){ p.result=nr; changed=true; }
-    if(nr!=='pending' && !p.settledAt){ p.settledAt = p.settledAt || Date.now(); changed=true; }
+    if(nr!=='pending' && !p.settledAt){ p.settledAt = Date.now(); changed=true; }
   }
   if(changed){
     try{ localStorage.setItem(picksKey(), JSON.stringify(picks)); }catch{}
   }
 }
 
+
+// Convert local pick → Supabase row
 function pickToRow(p) {
+
   const userId = currentUser?.id;
   if (!userId) return null;
-  // Stable ID: userId + gameId + type + side
-  const id = btoa([userId, p.gameId, p.type||'', p.side||''].join('|')).replace(/[^a-zA-Z0-9]/g,'').slice(0,40);
+
+  // IMPORTANT: generate stable UUID per pick
+  let id = p._syncId || p.id;
+
+  if(!id){
+    if(crypto?.randomUUID){
+      id = crypto.randomUUID();
+    }else{
+      id = `p_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    p._syncId = id;
+    p.id = id;
+
+    try{ localStorage.setItem(picksKey(), JSON.stringify(picks)); }catch{}
+  }
+
+  const res = normalizeResult(p.result);
+
   return {
     id,
     user_id: userId,
@@ -7217,26 +7233,38 @@ function pickToRow(p) {
     side: p.side || null,
     description: p.description || null,
     game_str: p.gameStr || null,
-    result: normalizeResult(p.result),
+    result: res,
     league: p.league || null,
-    made_at: p.madeAt || Date.now(),
-    wager: p.wager || 50,
-    odds: p.odds || -110,
-    confidence: p.confidence || 0,
+
+    made_at: Number(p.madeAt) || Date.now(),
+
+    wager: Number(p.wager) || 50,
+    odds: Number(p.odds) || -110,
+    confidence: Number(p.confidence) || 0,
     comment: p.comment || null,
-    line: p.line || null,
+    line: p.line ?? null,
     player_id: p.playerId || null,
     stat_key: p.statKey || null,
     parlay_legs: p.parlayLegs ? JSON.stringify(p.parlayLegs) : null,
     parlay_odds: p.parlayOdds || null,
-    settled_at: (normalizeResult(p.result)!=='pending' ? (p.settledAt || Date.now()) : null),
-    updated_at: Date.now(),
+
+    settled_at: (res !== 'pending'
+      ? (Number(p.settledAt) || Date.now())
+      : null),
+
+    // DO NOT send updated_at — DB handles it
   };
 }
 
+
 // Convert Supabase row → local pick
-function rowToPick(row) {
+function rowToPick(row){
+  const id = row.id;
+
   return {
+    id,
+    _syncId: id,
+
     gameId: row.game_id,
     actualGameId: row.actual_game_id || undefined,
     type: row.type,
@@ -7245,66 +7273,55 @@ function rowToPick(row) {
     gameStr: row.game_str,
     result: row.result || 'pending',
     league: row.league,
+
     madeAt: row.made_at,
     wager: row.wager || 50,
     odds: row.odds || -110,
     confidence: row.confidence || 0,
     comment: row.comment,
     line: row.line,
+
     playerId: row.player_id,
     statKey: row.stat_key,
-    parlayLegs: row.parlay_legs ? (typeof row.parlay_legs === 'string' ? JSON.parse(row.parlay_legs) : row.parlay_legs) : undefined,
+
+    parlayLegs: row.parlay_legs
+      ? (typeof row.parlay_legs === 'string'
+        ? JSON.parse(row.parlay_legs)
+        : row.parlay_legs)
+      : undefined,
+
     parlayOdds: row.parlay_odds,
-    settledAt: row.settled_at,
-    _syncId: row.id, // keep server ID for updates
+
+    settledAt: row.settled_at
   };
 }
 
 
+// Push local picks → server
+async function syncPicksToServer(){
 
-function getAuthToken() {
-  // Prefer in-memory session
-  if (typeof authSession !== 'undefined' && authSession && authSession.access_token) return authSession.access_token;
-  try {
-    const t = localStorage.getItem('sb_token');
-    if (t) return t;
-  } catch {}
-  // Supabase JS v2 stores JSON under sb-<project-ref>-auth-token
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
-        const raw = localStorage.getItem(k);
-        if (!raw) continue;
-        try {
-          const obj = JSON.parse(raw);
-          const token = obj?.access_token || obj?.currentSession?.access_token || obj?.session?.access_token;
-          if (token) return token;
-        } catch {}
-      }
-    }
-  } catch {}
-  return null;
-}
-// Push all local picks to Supabase (called from savePicks)
-async function syncPicksToServer() {
   if (!currentUser || !supaOnline) return;
   if (syncInProgress) return;
+
   const now = Date.now();
   if (now - lastSyncAt < SYNC_THROTTLE_MS) return;
+
   lastSyncAt = now;
   syncInProgress = true;
+
   try {
-    // Use server-side sync so Supabase is the source of truth for leaderboard/profile stats.
-    // Requires Netlify env vars: SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+
     const token = getAuthToken();
     if (!token) { syncInProgress = false; return; }
 
-    const rows0 = picks.map(pickToRow).filter(Boolean);
-    // Deduplicate by primary key within the same command to avoid PostgREST 21000 errors
-    const rows = Array.from(new Map(rows0.map(r => [r.id, r])).values());
-    if (!rows.length) { syncInProgress = false; return; }
+    const rows = picks
+      .map(pickToRow)
+      .filter(Boolean);
+
+    if (!rows.length){
+      syncInProgress = false;
+      return;
+    }
 
     const resp = await fetch('/.netlify/functions/sync-picks', {
       method: 'POST',
@@ -7318,147 +7335,116 @@ async function syncPicksToServer() {
       })
     });
 
-    if (!resp.ok) {
+    if(!resp.ok){
       const txt = await resp.text().catch(()=> '');
       throw new Error(`sync-picks failed: HTTP ${resp.status} ${txt}`);
     }
-  } catch (e) {
+
+  }catch(e){
     if (supaOnline !== false) console.warn('Pick sync to server failed:', e?.message);
-  } finally {
+  }
+  finally{
     syncInProgress = false;
   }
 }
 
-// Batch upsert helper (sbUpsert does single rows)
-async function sbUpsert_batch(table, rows) {
-  const r = await sbFetch(`${SUPA_REST}/${table}`, {
-    method: 'POST',
-    headers: {...SUPA_HDR, 'Prefer': 'resolution=merge-duplicates,return=minimal'},
-    body: JSON.stringify(rows),
-  });
-  if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(`HTTP ${r.status}: ${txt}`);
-  }
-  markSupaOk();
-}
 
-// Pull picks from Supabase and merge with local
-async function syncPicksFromServer(showIndicator = false) {
+// Pull picks from Supabase and merge
+async function syncPicksFromServer(showIndicator=false){
+
   if (!currentUser || !supaOnline) return false;
-  try {
-    if (showIndicator) showSyncIndicator('syncing');
-    const rows = await sbSelect('user_picks',
-      `user_id=eq.${currentUser.id}&select=*&order=made_at.desc&limit=500`);
-    if (!rows?.length) {
-      if (showIndicator) showSyncIndicator('ok');
+
+  try{
+
+    if(showIndicator) showSyncIndicator('syncing');
+
+    const rows = await sbSelect(
+      'user_picks',
+      `user_id=eq.${currentUser.id}&select=*&order=made_at.desc&limit=500`
+    );
+
+    if(!rows?.length){
+      if(showIndicator) showSyncIndicator('ok');
       return false;
     }
 
     const serverPicks = rows.map(rowToPick);
     let merged = false;
 
-    // Merge strategy: server wins on result, local wins on pending (client may have newer)
     serverPicks.forEach(sp => {
-      const localIdx = picks.findIndex(lp =>
-        lp.gameId === sp.gameId && lp.type === sp.type && lp.side === sp.side
+
+      const spId = sp._syncId || sp.id;
+
+      const localIdx = picks.findIndex(
+        lp => (lp._syncId || lp.id) === spId
       );
-      if (localIdx === -1) {
-        // New pick from server (another device)
+
+      if(localIdx === -1){
+
         picks.push(sp);
         merged = true;
-      } else {
+
+      }else{
+
         const lp = picks[localIdx];
-        // Server settled a previously-pending pick → apply result
-        if (lp.result === 'pending' && sp.result !== 'pending') {
-          const wasSettled = picks[localIdx].result;
-          picks[localIdx] = {...lp, result: sp.result, settledAt: sp.settledAt};
+
+        if(
+          normalizeResult(lp.result) === 'pending' &&
+          normalizeResult(sp.result) !== 'pending'
+        ){
+
+          const wasPending = normalizeResult(lp.result)==='pending';
+
+          picks[localIdx] = {
+            ...lp,
+            ...sp
+          };
+
           merged = true;
-          // Fire celebration for newly-settled pick
-          if (wasSettled === 'pending') {
+
+          if(wasPending){
             showWinCelebration(picks[localIdx]);
             notifyPickResult(picks[localIdx]);
           }
         }
-        // Sync comment/confidence from server if local doesn't have them
-        if (!lp.comment && sp.comment) { picks[localIdx].comment = sp.comment; merged = true; }
-        if (!lp.confidence && sp.confidence) { picks[localIdx].confidence = sp.confidence; merged = true; }
+
+        if(!lp.comment && sp.comment){
+          picks[localIdx].comment = sp.comment;
+          merged = true;
+        }
+
+        if(!lp.confidence && sp.confidence){
+          picks[localIdx].confidence = sp.confidence;
+          merged = true;
+        }
+
       }
+
     });
 
-    if (merged) {
-      // Save merged picks locally without triggering another server sync
+    if(merged){
+
       localStorage.setItem(picksKey(), JSON.stringify(picks));
+
       updateRecordUI();
       renderPicksPanel();
       updateBankrollUI();
       renderScores();
     }
 
-    if (showIndicator) showSyncIndicator('ok');
+    if(showIndicator) showSyncIndicator('ok');
+
     return merged;
-  } catch (e) {
+
+  }catch(e){
+
     if (supaOnline !== false) console.warn('Pick sync from server failed:', e?.message);
-    if (showIndicator) showSyncIndicator('error');
+
+    if(showIndicator) showSyncIndicator('error');
+
     return false;
   }
 }
-
-// Delete a pick from server when user removes it
-async function deletePickFromServer(pick) {
-  if (!currentUser || !supaOnline) return;
-  try {
-    const row = pickToRow(pick);
-    if (!row?.id) return;
-    await sbFetch(`${SUPA_REST}/user_picks?id=eq.${row.id}`, {
-      method: 'DELETE',
-      headers: SUPA_HDR,
-    });
-  } catch (e) {
-    if (supaOnline !== false) console.warn('Pick delete from server failed:', e?.message);
-  }
-}
-
-// Sync indicator UI
-function showSyncIndicator(state) {
-  let el = document.getElementById('syncIndicator');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'syncIndicator';
-    el.style.cssText = 'position:fixed;bottom:70px;right:12px;z-index:500;font-family:"DM Mono",monospace;font-size:9px;letter-spacing:1px;padding:4px 8px;border-radius:4px;transition:all .3s;pointer-events:none;';
-    document.body.appendChild(el);
-  }
-  if (state === 'syncing') {
-    el.textContent = '⟳ SYNCING';
-    el.style.background = 'rgba(0,229,255,.12)';
-    el.style.color = 'var(--accent)';
-    el.style.opacity = '1';
-  } else if (state === 'ok') {
-    el.textContent = '✓ SYNCED';
-    el.style.background = 'rgba(46,213,115,.12)';
-    el.style.color = '#2ed573';
-    el.style.opacity = '1';
-    setTimeout(() => { el.style.opacity = '0'; }, 2000);
-  } else {
-    el.textContent = '⚠ OFFLINE';
-    el.style.background = 'rgba(255,71,87,.1)';
-    el.style.color = '#ff4757';
-    el.style.opacity = '1';
-    setTimeout(() => { el.style.opacity = '0'; }, 3000);
-  }
-}
-
-// Poll server for newly-settled picks every 2 minutes
-// serverSyncTimer hoisted to top
-function startServerSync() {
-  if (serverSyncTimer) clearInterval(serverSyncTimer);
-  // Initial sync on login
-  setTimeout(() => syncPicksFromServer(true), 2000);
-  // Then every 2 minutes
-  serverSyncTimer = setInterval(() => syncPicksFromServer(false), 120000);
-}
-
-
 
 // ═══════════════════════════════════════════════════════
 // APP HERO
