@@ -7409,103 +7409,115 @@ async function syncPicksToServer(){
   }
 }
 
-
-// Pull picks from Supabase and merge
-async function syncPicksFromServer(showIndicator=false){
-
+// Pull picks from Supabase and merge with local
+async function syncPicksFromServer(showIndicator = false) {
   if (!currentUser || !supaOnline) return false;
 
-  try{
-
-    if(showIndicator) showSyncIndicator('syncing');
+  try {
+    if (showIndicator) showSyncIndicator('syncing');
 
     const rows = await sbSelect(
       'user_picks',
       `user_id=eq.${currentUser.id}&select=*&order=made_at.desc&limit=500`
     );
 
-    if(!rows?.length){
-      if(showIndicator) showSyncIndicator('ok');
+    if (!rows?.length) {
+      if (showIndicator) showSyncIndicator('ok');
       return false;
     }
 
     const serverPicks = rows.map(rowToPick);
     let merged = false;
 
+    // Merge strategy: server wins on settled result; local wins on pending
     serverPicks.forEach(sp => {
-
-      const spId = sp._syncId || sp.id;
-
-      const localIdx = picks.findIndex(
-        lp => (lp._syncId || lp.id) === spId
+      const localIdx = picks.findIndex(lp =>
+        lp.gameId === sp.gameId && lp.type === sp.type && lp.side === sp.side
       );
 
-      if(localIdx === -1){
-
+      if (localIdx === -1) {
         picks.push(sp);
         merged = true;
-
-      }else{
-
-        const lp = picks[localIdx];
-
-        if(
-          normalizeResult(lp.result) === 'pending' &&
-          normalizeResult(sp.result) !== 'pending'
-        ){
-
-          const wasPending = normalizeResult(lp.result)==='pending';
-
-          picks[localIdx] = {
-            ...lp,
-            ...sp
-          };
-
-          merged = true;
-
-          if(wasPending){
-            showWinCelebration(picks[localIdx]);
-            notifyPickResult(picks[localIdx]);
-          }
-        }
-
-        if(!lp.comment && sp.comment){
-          picks[localIdx].comment = sp.comment;
-          merged = true;
-        }
-
-        if(!lp.confidence && sp.confidence){
-          picks[localIdx].confidence = sp.confidence;
-          merged = true;
-        }
-
+        return;
       }
 
+      const lp = picks[localIdx];
+
+      // Apply server settlement if local is still pending
+      if (normalizeResult(lp.result) === 'pending' && normalizeResult(sp.result) !== 'pending') {
+        const wasPending = normalizeResult(lp.result) === 'pending';
+        picks[localIdx] = { ...lp, result: normalizeResult(sp.result), settledAt: sp.settledAt || Date.now() };
+        merged = true;
+
+        if (wasPending) {
+          try { showWinCelebration(picks[localIdx]); } catch {}
+          try { notifyPickResult(picks[localIdx]); } catch {}
+        }
+      }
+
+      // Pull comment/confidence from server if local missing
+      if (!lp.comment && sp.comment) { picks[localIdx].comment = sp.comment; merged = true; }
+      if ((!lp.confidence || lp.confidence === 0) && sp.confidence) { picks[localIdx].confidence = sp.confidence; merged = true; }
     });
 
-    if(merged){
-
-      localStorage.setItem(picksKey(), JSON.stringify(picks));
-
+    if (merged) {
+      try { localStorage.setItem(picksKey(), JSON.stringify(picks)); } catch {}
       updateRecordUI();
       renderPicksPanel();
-      updateBankrollUI();
-      renderScores();
+      updateBankrollUI?.();
+      renderScores?.();
     }
 
-    if(showIndicator) showSyncIndicator('ok');
-
+    if (showIndicator) showSyncIndicator('ok');
     return merged;
-
-  }catch(e){
-
-    if (supaOnline !== false) console.warn('Pick sync from server failed:', e?.message);
-
-    if(showIndicator) showSyncIndicator('error');
-
+  } catch (e) {
+    console.warn('Pick sync from server failed:', e?.message || e);
+    if (showIndicator) showSyncIndicator('error');
     return false;
   }
 }
+
+
+// ─────────────────────────────────────────────────────────────
+// Realtime listener for picks (refresh UI when DB changes)
+// ─────────────────────────────────────────────────────────────
+let picksRealtimeSub = null;
+
+function startPicksRealtime() {
+  try {
+    if (!supabase || !currentUser?.id) return;
+
+    // Ensure only 1 subscription
+    stopPicksRealtime();
+
+    picksRealtimeSub = supabase
+      .channel(`user_picks_${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_picks',
+          filter: `user_id=eq.${currentUser.id}`
+        },
+        async () => {
+          await syncPicksFromServer(false);
+          renderPicksPanel();
+          updateRecordUI();
+          renderScores?.();
+        }
+      )
+      .subscribe();
+  } catch (e) {
+    console.warn('Realtime error:', e?.message || e);
+  }
+}
+
+function stopPicksRealtime() {
+  try { picksRealtimeSub?.unsubscribe?.(); } catch {}
+  picksRealtimeSub = null;
+}
+ 
 
 // ═══════════════════════════════════════════════════════
 // APP HERO
