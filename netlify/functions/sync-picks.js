@@ -24,29 +24,29 @@ function toNum(v, d = 0) {
 }
 
 /**
+ * Returns epoch milliseconds as a Number (for bigint columns).
  * Accepts:
- * - bigint/number (epoch ms or sec)
- * - ISO string
- * - Postgres timestamptz string like "2026-03-03 23:10:08.97272+00"
- * Returns epoch milliseconds (number) or null
+ * - number/bigint (epoch ms or epoch sec)
+ * - numeric string
+ * - ISO strings
+ * - Postgres timestamptz strings like "2026-03-04 00:07:33.090991+00"
  */
 function toEpochMs(v) {
   if (v == null) return null;
 
-  // already numeric
   if (typeof v === "number") {
     if (!Number.isFinite(v)) return null;
-    // if looks like seconds, convert to ms
-    if (v > 0 && v < 2e10) return v; // ms typical ~ 1.7e12; seconds ~ 1.7e9
+    // if seconds-like, convert to ms
+    if (v > 0 && v < 2e10) return Math.round(v);
     if (v > 0 && v < 2e9) return Math.round(v * 1000);
     return Math.round(v);
   }
+
   if (typeof v === "bigint") {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   }
 
-  // strings
   if (typeof v === "string") {
     const s = v.trim();
     if (!s) return null;
@@ -59,24 +59,19 @@ function toEpochMs(v) {
       return Math.round(n);
     }
 
-    // Normalize common Postgres timestamptz formats to ISO:
-    // "YYYY-MM-DD HH:MM:SS.ffffff+00" -> "YYYY-MM-DDTHH:MM:SS.ffffffZ"
-    // "YYYY-MM-DD HH:MM:SS+00"        -> "YYYY-MM-DDTHH:MM:SSZ"
-    let iso = s;
+    // Normalize common Postgres timestamptz formats to ISO
+    let iso = s.replace(" ", "T");
 
-    // space -> T
-    iso = iso.replace(" ", "T");
-
-    // timezone +00 or -05 -> Z / +00:00 / -05:00
-    // if ends with +00 or -00 => Z
+    // "+00" -> "Z"
     iso = iso.replace(/([+-]00)$/i, "Z");
-    // if ends with +00:00 already, ok. if ends with +00?? no colon, add :00
+
+    // "+0000" -> "+00:00"
     iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
 
-    // If we now end with "+00:00", convert to Z
+    // "+00:00" -> "Z"
     iso = iso.replace(/\+00:00$/i, "Z");
 
-    // Date.parse can choke on >3 fractional digits sometimes; trim to 3
+    // trim fractional seconds to 3 digits (JS parsing safety)
     iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2");
 
     const ms = Date.parse(iso);
@@ -95,7 +90,6 @@ function profitFromOdds(risk, odds) {
 }
 
 function pickMadeAt(p) {
-  // Prefer your table’s bigint made_at
   const ms =
     toEpochMs(p?.made_at) ??
     toEpochMs(p?.created_at) ??
@@ -180,6 +174,7 @@ function computeRatingsFromRows(rows) {
     const winRate = (w / denom) * 100;
     const roi = risk ? (profit / risk) * 100 : 0;
     const units = profit / 50;
+
     return { w, l, push, pend, decided, risk, profit, winRate, roi, units };
   }
 
@@ -285,29 +280,44 @@ async function supa(path, { method = "GET", headers = {}, body } = {}) {
 async function verifyUser(accessToken) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY, // ok for auth verify
-      authorization: `Bearer ${accessToken}`, // user's access token
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      authorization: `Bearer ${accessToken}`,
     },
   });
   if (!res.ok) return null;
   return await res.json();
 }
 
-// Force bigint fields into epoch ms
 function normalizePickForDb(p) {
+  const nowMs = Date.now();
+
   const made =
     toEpochMs(p?.made_at) ??
-    toEpochMs(p?.created_at) ??
     toEpochMs(p?.madeAt) ??
+    toEpochMs(p?.created_at) ??
     toEpochMs(p?.createdAt) ??
-    Date.now();
+    toEpochMs(p?.ts) ??
+    nowMs;
 
-  const settled = toEpochMs(p?.settled_at) ?? toEpochMs(p?.settledAt) ?? null;
-  const updated = toEpochMs(p?.updated_at) ?? toEpochMs(p?.updatedAt) ?? Date.now();
+  const settled =
+    toEpochMs(p?.settled_at) ??
+    toEpochMs(p?.settledAt) ??
+    toEpochMs(p?.settled_on) ??
+    toEpochMs(p?.settledOn) ??
+    null;
 
-  // IMPORTANT: ensure we don't accidentally pass string timestamps into BIGINT cols
+  const updated =
+    toEpochMs(p?.updated_at) ??
+    toEpochMs(p?.updatedAt) ??
+    toEpochMs(p?.updated_on) ??
+    toEpochMs(p?.updatedOn) ??
+    nowMs;
+
+  // Drop created_at to avoid accidental type mismatch (DB has created_at timestamptz default)
+  const { created_at, ...rest } = p;
+
   return {
-    ...p,
+    ...rest,
     made_at: made,
     settled_at: settled,
     updated_at: updated,
@@ -330,6 +340,7 @@ exports.handler = async (event) => {
     const picks = Array.isArray(payload.picks) ? payload.picks : [];
     const name = String(payload.name || payload.displayName || payload.email || "").slice(0, 80);
 
+    // Upsert picks
     if (picks.length) {
       const rows = picks
         .filter((r) => r && r.id)
@@ -356,7 +367,7 @@ exports.handler = async (event) => {
     );
 
     const stats = computeRatingsFromRows(userRows);
-    const calculated_at = new Date().toISOString();
+    const calculated_at = new Date().toISOString(); // timestamptz (matches your schema)
 
     // Upsert into user_ratings (snapshot)
     const ratingRow = { user_id: user.id, calculated_at, ...stats };
@@ -369,7 +380,7 @@ exports.handler = async (event) => {
       body: JSON.stringify([ratingRow]),
     });
 
-    // Best-effort name map
+    // Name map / heartbeat in leaderboard
     if (name) {
       try {
         await supa(`/rest/v1/leaderboard?on_conflict=user_id`, {
@@ -378,18 +389,16 @@ exports.handler = async (event) => {
             "content-type": "application/json",
             Prefer: "resolution=merge-duplicates",
           },
-          body: JSON.stringify([{ user_id: user.id, name, updated_at: calculated_at }]),
+          // IMPORTANT: leaderboard.updated_at is BIGINT in your schema
+          body: JSON.stringify([{ user_id: user.id, name, updated_at: Date.now() }]),
         });
-      } catch {}
+      } catch {
+        // ignore if table/columns don't exist
+      }
     }
 
     return json(200, { ok: true, user_id: user.id, stats });
   } catch (e) {
-    // Return enough to debug without leaking secrets
-    return json(500, {
-      error: e?.message || "Server error",
-      status: e?.status || null,
-      data: e?.data || null,
-    });
+    return json(500, { error: e?.message || "Server error", status: e?.status || null, data: e?.data || null });
   }
 };
