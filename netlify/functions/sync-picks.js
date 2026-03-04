@@ -28,6 +28,20 @@ function toNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
+// --- NEW: ensure every pick has a safe unique id (prevents overwrites) ---
+function isUuidLike(id) {
+  return (
+    typeof id === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+  );
+}
+
+function makeId() {
+  return globalThis.crypto?.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 /**
  * Returns epoch milliseconds as a Number.
  * Accepts:
@@ -250,7 +264,7 @@ function computeRatingsFromRows(rows) {
 
 async function supa(path, { method = "GET", headers = {}, body } = {}) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_ROLE_KEY");
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   }
   const url = `${SUPABASE_URL}${path}`;
   const res = await fetch(url, {
@@ -341,23 +355,36 @@ exports.handler = async (event) => {
     const picks = Array.isArray(payload.picks) ? payload.picks : [];
     const name = String(payload.name || payload.displayName || payload.email || "").slice(0, 80);
 
-    // Upsert picks
+    // Upsert picks (force safe UUID ids so rows don't overwrite)
     if (picks.length) {
       const rows = picks
-        .filter((r) => r && r.id)
-        .map((r) => ({
-          ...normalizePickForDb(r),
-          user_id: user.id,
-        }));
+        .filter((r) => r)
+        .map((r) => {
+          const safeId = isUuidLike(r.id) ? r.id : makeId();
+          return {
+            ...normalizePickForDb({ ...r, id: safeId }),
+            user_id: user.id,
+          };
+        });
 
-      if (rows.length) {
+      // Optional: prevent duplicate ids inside a single payload
+      const seen = new Set();
+      const deduped = [];
+      for (const row of rows) {
+        if (!row.id) continue;
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        deduped.push(row);
+      }
+
+      if (deduped.length) {
         await supa(`/rest/v1/user_picks?on_conflict=id`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
             Prefer: "resolution=merge-duplicates",
           },
-          body: JSON.stringify(rows),
+          body: JSON.stringify(deduped),
         });
       }
     }
@@ -368,7 +395,7 @@ exports.handler = async (event) => {
     );
 
     const stats = computeRatingsFromRows(userRows);
-    const calculated_at = new Date().toISOString(); // timestamptz (matches your user_ratings schema)
+    const calculated_at = new Date().toISOString(); // timestamptz
 
     // Upsert into user_ratings (snapshot)
     const ratingRow = { user_id: user.id, calculated_at, ...stats };
