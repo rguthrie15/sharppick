@@ -2523,143 +2523,177 @@ function typeLabel(type){
   if(type==='prop')   return 'PROP';
   return type.toUpperCase();
 }
+function pickStableId(p){
+  // Prefer server id if available, else local id, else a fallback signature.
+  return p?._syncId || p?.id || `${p?.gameId||''}|${p?.type||''}|${p?.side||''}|${p?.madeAt||''}|${p?.description||''}`;
+}
 
 function renderPicksPanel(){
-  const el=document.getElementById('panelPicksList');
-  const fp=filteredPicks();
-  const pending=fp.filter(p=>p.result==='pending');
-  const settled=fp.filter(p=>normalizeResult(p.result)!=='pending');
+  const el = document.getElementById('panelPicksList');
+  if(!el) return;
+
+  // IMPORTANT: Use the real local picks array as the source of truth
+  const all = Array.isArray(picks) ? picks.slice() : [];
+
+  // Apply the same category filter your UI expects (but do NOT cap to 10)
+  const fp = all.filter(p=>{
+    if(activePickCat === 'all') return true;
+    // activePickCat seems to be category/type like 'spread', 'ou', 'parlay', etc.
+    return (p?.type || '') === activePickCat;
+  });
+
+  const pending = fp.filter(p => normalizeResult(p.result) === 'pending');
+  const settled = fp.filter(p => normalizeResult(p.result) !== 'pending');
 
   if(!fp.length){
-    const msg=activePickCat==='all'
-      ?'NO PICKS YET<br><br>Open any game to pick props,<br>spreads, or totals'
-      :`NO ${typeLabel(activePickCat)} PICKS YET`;
-    el.innerHTML=`<div class="no-picks">${msg}</div>`;
+    const msg = activePickCat === 'all'
+      ? 'NO PICKS YET<br><br>Open any game to pick props,<br>spreads, or totals'
+      : `NO ${typeLabel(activePickCat)} PICKS YET`;
+    el.innerHTML = `<div class="no-picks">${msg}</div>`;
     return;
   }
 
-  let html='';
+  // Build a fast lookup from stable id -> index in the master picks array
+  const idxById = new Map();
+  for(let i=0;i<all.length;i++){
+    idxById.set(pickStableId(all[i]), i);
+  }
+
+  let html = '';
 
   // ── Active / pending picks — can delete ──
   if(pending.length){
-    html+=`<div class="picks-section-hdr">
+    html += `<div class="picks-section-hdr">
       <span class="picks-section-title">Active</span>
       <div class="picks-section-line"></div>
       <span class="picks-section-cnt">${pending.length}</span>
     </div>`;
-    html+=pending.sort((a,b)=>b.madeAt-a.madeAt).map(p=>{
-      const idx=picks.findIndex(x=>x.gameId===p.gameId&&x.type===p.type&&x.side===p.side);
-      const pKey=`${p.gameId}_${p.type}_${p.side}`;
-      return `<div class="pick-item">
-        <div class="pi-top">
-          <div style="display:flex;align-items:center;gap:6px">
-            <span class="pi-type-tag">${typeLabel(p.type)}</span>
-            <span class="pi-league">${p.league||''}</span>
-            ${p.type==='parlay'?`<span class="parlay-tag">PARLAY</span>`:''}
+
+    html += pending
+      .sort((a,b)=>(Number(b.madeAt)||0)-(Number(a.madeAt)||0))
+      .map(p=>{
+        const sid = pickStableId(p);
+        const idx = idxById.get(sid);
+
+        // Use stable key for confidence/comments so multiple similar picks don’t collide
+        const pKey = sid;
+
+        const safeIdx = Number.isInteger(idx) ? idx : -1;
+
+        return `<div class="pick-item">
+          <div class="pi-top">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="pi-type-tag">${typeLabel(p.type)}</span>
+              <span class="pi-league">${p.league||''}</span>
+              ${p.type==='parlay'?`<span class="parlay-tag">PARLAY</span>`:''}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="pi-badge pending">PENDING</span>
+              ${lockBadgeHTML(p)}
+              ${p.type==='parlay' && safeIdx>=0 ? `<button class="pi-share-btn" onclick="manualSettleParlay(${safeIdx})" title="Force settle this parlay" style="font-size:9px;padding:2px 5px">🔄</button>` : ''}
+              ${safeIdx>=0 ? `<button class="pi-share-btn" onclick="sharePickCard({...picks[${safeIdx}],name:currentUser?.name})" title="Share pick">📤</button>` : ''}
+              ${safeIdx>=0 ? `<button class="pi-del" onclick="deletePick(${safeIdx})" title="Remove pick">✕</button>` : ''}
+            </div>
           </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span class="pi-badge pending">PENDING</span>
-            ${lockBadgeHTML(p)}
-            ${p.type==='parlay'?`<button class="pi-share-btn" onclick="manualSettleParlay(${idx})" title="Force settle this parlay" style="font-size:9px;padding:2px 5px">🔄</button>`:''}
-            <button class="pi-share-btn" onclick="sharePickCard({...picks[${idx}],name:currentUser?.name})" title="Share pick">📤</button>
-            <button class="pi-del" onclick="deletePick(${idx})" title="Remove pick">✕</button>
-          </div>
-        </div>
-        <div class="pi-pick">${p.description}</div>
-        ${p.wager?`<div class="pi-wager">💰 $${p.wager} to win +$${calcPayout(p.wager,p.odds||-110)}</div>`:''}
-        <div class="pi-score">${p.gameStr||''}</div>
-        ${p.type!=='parlay'?confidenceHTML(pKey,p.confidence||0):''}
-        ${p.type!=='parlay'?lockBtnHTML(p):''}
-        ${p.type!=='parlay'?pickCommentHTML(p):''}
-      </div>`;
-    }).join('');
+          <div class="pi-pick">${p.description || ''}</div>
+          ${p.wager ? `<div class="pi-wager">💰 $${p.wager} to win +$${calcPayout(p.wager,p.odds||-110)}</div>` : ''}
+          <div class="pi-score">${p.gameStr||''}</div>
+          ${p.type!=='parlay' ? confidenceHTML(pKey, p.confidence||0) : ''}
+          ${p.type!=='parlay' ? lockBtnHTML(p) : ''}
+          ${p.type!=='parlay' ? pickCommentHTML(p) : ''}
+        </div>`;
+      })
+      .join('');
   }
 
   // ── Settled picks — locked, no delete, result shown ──
-  if(settled.length){
-    html+=`<div class="picks-section-hdr" style="margin-top:${pending.length?'6px':'0'}">
+  if (settled.length) {
+    html += `<div class="picks-section-hdr" style="margin-top:${pending.length ? '6px' : '0'}">
       <span class="picks-section-title">Settled</span>
       <div class="picks-section-line"></div>
       <span class="picks-section-cnt">${settled.length}</span>
     </div>`;
-    html+=settled.sort((a,b)=>b.madeAt-a.madeAt).map(p=>{
-      return `<div class="pick-item pick-item-settled pick-settled-${p.result}">
-        <div class="pi-top">
-          <div style="display:flex;align-items:center;gap:6px">
-            <span class="pi-type-tag">${typeLabel(p.type)}</span>
-            <span class="pi-league">${p.league||''}</span>
-            ${p.type==='parlay'?`<span class="parlay-tag">PARLAY</span>`:''}
+
+    html += settled
+      .sort((a,b)=>(Number(b.madeAt)||0)-(Number(a.madeAt)||0))
+      .map(p=>{
+        const res = normalizeResult(p.result);
+        return `<div class="pick-item pick-item-settled pick-settled-${res}">
+          <div class="pi-top">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="pi-type-tag">${typeLabel(p.type)}</span>
+              <span class="pi-league">${p.league||''}</span>
+              ${p.type==='parlay'?`<span class="parlay-tag">PARLAY</span>`:''}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="pi-badge ${res}">${String(res).toUpperCase()}</span>
+              ${lockBadgeHTML(p)}
+              <button class="pi-share-btn" style="margin-left:4px"
+                onclick="sharePickCard(${JSON.stringify({...p,name:currentUser?.name}).replace(/"/g,'&quot;')})"
+                title="Share pick">📤</button>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;gap:6px">
-            <span class="pi-badge ${p.result}">${p.result.toUpperCase()}</span>
-            ${lockBadgeHTML(p)}
-            <button class="pi-share-btn" style="margin-left:4px" onclick="sharePickCard(${JSON.stringify({...p,name:currentUser?.name}).replace(/"/g,'&quot;')})" title="Share pick">📤</button>
-          </div>
-        </div>
-        <div class="pi-pick">${p.description}</div>
-        ${p.wager?(()=>{
-          const profit=calcPayout(p.wager,p.odds||-110);
-          if(p.result==='won') return `<div class="pi-pnl pos">+$${profit}</div>`;
-          if(p.result==='lost') return `<div class="pi-pnl neg">-$${p.wager}</div>`;
-          return `<div class="pi-wager">💰 $${p.wager}</div>`;
-        })():''}
-        <div class="pi-score">${p.gameStr||''}</div>
-        ${(p.confidence!=null)?(()=>{const raw=Number(p.confidence)||0;const stars=(raw>5)?Math.round(raw/20):raw;const s=Math.max(0,Math.min(5,stars));return '<div style="font-size:11px;color:var(--gold)">'+('★'.repeat(s))+('☆'.repeat(5-s))+'</div>';})():''}
-        ${p.comment?`<div class="pick-comment-display">${p.comment}</div>`:''}
-        <div class="pi-locked-note">🔒 Settled — view full history in History tab</div>
-      </div>`;
-    }).join('');
+
+          <div class="pi-pick">${p.description || ''}</div>
+
+          ${p.wager ? (() => {
+            const profit = calcPayout(p.wager, p.odds||-110);
+            if(res==='won') return `<div class="pi-pnl pos">+$${profit}</div>`;
+            if(res==='lost') return `<div class="pi-pnl neg">-$${p.wager}</div>`;
+            return `<div class="pi-wager">💰 $${p.wager}</div>`;
+          })() : ''}
+
+          <div class="pi-score">${p.gameStr||''}</div>
+
+          ${(p.confidence!=null) ? (() => {
+            const raw = Number(p.confidence) || 0;
+            const stars = (raw > 5) ? Math.round(raw / 20) : raw;
+            const s = Math.max(0, Math.min(5, stars));
+            return `<div style="font-size:11px;color:var(--gold)">${'★'.repeat(s)}${'☆'.repeat(5-s)}</div>`;
+          })() : ''}
+
+          ${p.comment ? `<div class="pick-comment-display">${p.comment}</div>` : ''}
+
+          <div class="pi-locked-note">🔒 Settled — view full history in History tab</div>
+        </div>`;
+      })
+      .join('');
   }
-
-  el.innerHTML=html;
+  el.innerHTML = html;
 }
-
 
 function deletePick(idx){
   // Only allow deleting pending picks
-  const pick = picks[idx];
-  if(!pick||pick.result!=='pending') return;
-  deletePickFromServer(pick); // async fire-and-forget
-  picks.splice(idx,1);
-  savePicks();renderPicksPanel();updateRecordUI();renderScores();
+  const pick = picks?.[idx];
+  if(!pick || normalizeResult(pick.result) !== 'pending') return;
+
+  // Optional safety while debugging: comment this out if you don’t want server deletes yet
+  // deletePickFromServer(pick); // async fire-and-forget
+
+  picks.splice(idx, 1);
+  savePicks();
+  renderPicksPanel();
+  updateRecordUI();
+  renderScores();
 }
+
 function clearAllPicks(){
   // Only clears pending picks; completed are preserved in history
-  const hadPending=picks.some(p=>p.result==='pending');
+  const hadPending = Array.isArray(picks) && picks.some(p => normalizeResult(p.result) === 'pending');
   if(!hadPending) return;
-  showConfirm('Remove pending picks?','Settled picks stay in History — only pending picks will be removed.',()=>{
-    picks=picks.filter(p=>normalizeResult(p.result)!=='pending');
-    savePicks();renderPicksPanel();updateRecordUI();renderScores();
-  });
+
+  showConfirm(
+    'Remove pending picks?',
+    'Settled picks stay in History — only pending picks will be removed.',
+    () => {
+      picks = picks.filter(p => normalizeResult(p.result) !== 'pending');
+      savePicks();
+      renderPicksPanel();
+      updateRecordUI();
+      renderScores();
+    }
+  );
 }
-// History filter state
-let histFilterType = 'all';
-let histFilterResult = 'all';
-let histFilterLeague = 'all';
-let histSortBy = 'date';
-let histSearch = '';
-
-function renderHistoryView(){
-  const el=document.getElementById('historyContent');
-  const allSettled=picks.filter(p=>normalizeResult(p.result)!=='pending');
-  // Apply filters
-  let settled = allSettled.filter(p=>{
-    if(histFilterType!=='all' && p.type!==histFilterType) return false;
-    if(histFilterResult!=='all' && p.result!==histFilterResult) return false;
-    if(histFilterLeague!=='all' && (p.league||'Other')!==histFilterLeague) return false;
-    if(histSearch && !p.description?.toLowerCase().includes(histSearch.toLowerCase()) &&
-       !p.gameStr?.toLowerCase().includes(histSearch.toLowerCase())) return false;
-    return true;
-  });
-  if(histSortBy==='pnl') settled.sort((a,b)=>{
-    const pnl=p=>{if(p.result==='won') return calcPayout(p.wager||50,p.odds||-110); if(p.result==='lost') return -(p.wager||50); return 0;};
-    return pnl(b)-pnl(a);
-  });
-  else settled.sort((a,b)=>b.madeAt-a.madeAt);
-
-  // Build league list for filter
-  const allLeagues = [...new Set(allSettled.map(p=>p.league||'Other'))].sort();
-
   // Filter bar HTML
   const filterBar = `<div class="hist-filter-bar">
     <input class="hist-search" type="text" placeholder="🔍 Search picks…" value="${histSearch}"
@@ -2787,16 +2821,17 @@ function renderHistoryView(){
         </div>
         <div class="hist-pick-desc">${p.description}</div>
         <div class="hist-game-str">${p.gameStr||''}</div>
-        ${p.comment?`<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:4px">"${p.comment}"</div>`:''}
-        ${typeof settlementAuditHTML==='function'?settlementAuditHTML(p):''}
+       ${p.comment ? `<div style="font-size:10px;color:var(--muted);font-style:italic;margin-top:4px">${String(p.comment)}</div>` : ''}
+${typeof settlementAuditHTML === 'function' ? settlementAuditHTML(p) : ''}
       </div>`;
+
     });
 
     html+=`</div></div>`;
   });
 
   el.innerHTML=html;
-}
+
 
 function openPanel(){checkPickResults();checkPropPickResults();checkParlayResults();renderPicksPanel();updateRecordUI();document.getElementById('picksPanel').classList.add('open');document.getElementById('panelOverlay').classList.add('open');}
 function closePanel(){document.getElementById('picksPanel').classList.remove('open');document.getElementById('panelOverlay').classList.remove('open');}
@@ -2814,29 +2849,53 @@ document.addEventListener('keydown',e=>{
 // ═══════════════════════════════════════════════════════
 // CALENDAR
 // ═══════════════════════════════════════════════════════
+
 function renderCalendar(){
-  const y=calMonth.getFullYear(),m=calMonth.getMonth();
-  document.getElementById('monthTitle').textContent=calMonth.toLocaleDateString([],{month:'long',year:'numeric'});
-  const firstDow=new Date(y,m,1).getDay(),daysInM=new Date(y,m+1,0).getDate(),today=todayStr();
-  let html=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=>`<div class="cal-dow">${d}</div>`).join('');
-  for(let i=0;i<firstDow;i++) html+=`<div class="cal-cell empty"></div>`;
-  for(let day=1;day<=daysInM;day++){
-    const ds=`${y}${pad(m+1)}${pad(day)}`;
-    const isToday=ds===today,isSel=ds===selDate;
-    const games=cache[ds]||[],cnt=games.length;
-    const dm={};games.forEach(g=>{dm[g.dot]=true;});
-    const dots=Object.keys(dm).map(c=>`<div class="cal-dot dot-${c}"></div>`).join('');
-    html+=`<div class="cal-cell${isToday?' tod':''}${isSel?' sel':''}" data-ds="${ds}" onclick="calClick('${ds}')">
-      <div class="cal-num">${day}</div><div class="cal-dots">${dots}</div>
-      ${cnt>0?`<div class="cal-gcnt">${cnt} games</div>`:''}
+  const y = calMonth.getFullYear(), m = calMonth.getMonth();
+  const dateLabel = calMonth.toLocaleDateString(undefined, { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+  document.getElementById('monthTitle').textContent = dateLabel;
+
+  const firstDow = new Date(y,m,1).getDay(),
+        daysInM  = new Date(y,m+1,0).getDate(),
+        today    = todayStr();
+
+  let html = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+    .map(d=>`<div class="cal-dow">${d}</div>`)
+    .join('');
+
+  for(let i=0;i<firstDow;i++) html += `<div class="cal-cell empty"></div>`;
+
+  for(let day=1; day<=daysInM; day++){
+    const ds = `${y}${pad(m+1)}${pad(day)}`;
+    const isToday = ds === today, isSel = ds === selDate;
+    const games = cache[ds] || [], cnt = games.length;
+
+    const dm = {};
+    games.forEach(g => { dm[g.dot] = true; });
+
+    const dots = Object.keys(dm)
+      .map(c=>`<div class="cal-dot dot-${c}"></div>`)
+      .join('');
+
+    html += `<div class="cal-cell${isToday?' tod':''}${isSel?' sel':''}" data-ds="${ds}" onclick="calClick('${ds}')">
+      <div class="cal-num">${day}</div>
+      <div class="cal-dots">${dots}</div>
+      ${cnt>0 ? `<div class="cal-gcnt">${cnt} games</div>` : ''}
     </div>`;
   }
-  document.getElementById('calGrid').innerHTML=html;
-  const uncached=[];
-  for(let day=1;day<=daysInM;day++){const ds=`${y}${pad(m+1)}${pad(day)}`;if(!cache[ds])uncached.push(ds);}
-  uncached.sort((a,b)=>Math.abs(a.localeCompare(todayStr()))-Math.abs(b.localeCompare(todayStr())));
+
+  document.getElementById('calGrid').innerHTML = html;
+
+  const uncached = [];
+  for(let day=1; day<=daysInM; day++){
+    const ds = `${y}${pad(m+1)}${pad(day)}`;
+    if(!cache[ds]) uncached.push(ds);
+  }
+
+  uncached.sort((a,b)=>Math.abs(a.localeCompare(today))-Math.abs(b.localeCompare(today)));
   enqueuePrefetch(uncached);
 }
+
 function calClick(ds){selDate=ds;document.querySelectorAll('.cal-cell.sel').forEach(c=>c.classList.remove('sel'));document.querySelector(`[data-ds="${ds}"]`)?.classList.add('sel');setMode('scores');selectDate(ds);}
 function shiftMonth(dir){calMonth.setMonth(calMonth.getMonth()+dir);renderCalendar();}
 function goToday(){calMonth=new Date();renderCalendar();}
@@ -7311,7 +7370,10 @@ async function syncPicksToServer(){
 
   try {
 
-    const token = getAuthToken();
+   const token =
+  (typeof authSession !== 'undefined' && authSession?.access_token) ||
+  (() => { try { return localStorage.getItem('sb_token'); } catch { return null; } })();
+
     if (!token) { syncInProgress = false; return; }
 
     const rows = picks
