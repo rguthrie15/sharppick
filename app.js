@@ -2693,7 +2693,8 @@ function clearAllPicks(){
       renderScores();
     }
   );
-
+}
+function renderHistoryView(){
   // Filter bar HTML
   const filterBar = `<div class="hist-filter-bar">
     <input class="hist-search" type="text" placeholder="🔍 Search picks…" value="${histSearch}"
@@ -2731,7 +2732,6 @@ function clearAllPicks(){
     </div>`;
     return;
   }
-
   // Totals per type
   const types=['spread','total','prop'];
   const tally=(arr)=>({
@@ -2791,19 +2791,18 @@ function clearAllPicks(){
     const g=tally(group);
     const decided2=g.w+g.l;
     const dateObj=new Date(+ds.slice(0,4),+ds.slice(4,6)-1,+ds.slice(6,8));
-    const dateLabel=dateObj.toLocaleDateString([],{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    const dateLabel = dateObj.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric',year:'numeric'});
 
-    html+=`<div class="hist-date-group">
-      <div class="hist-date-hdr">
-        <div class="hist-date-label">${dateLabel}</div>
-        <div class="hist-date-line"></div>
-        <div class="hist-date-record">
-          <span class="w">${g.w}W</span>&nbsp;<span class="l">${g.l}L</span>${g.p?`&nbsp;<span class="p">${g.p}P</span>`:''}&nbsp;
-          ${decided2>0?`<span style="color:var(--accent)">${Math.round(g.w/decided2*100)}%</span>`:''}
-        </div>
-      </div>
-      <div class="hist-grid">`;
-
+ html+=`<div class="hist-date-group">
+  <div class="hist-date-hdr">
+    <div class="hist-date-label">${dateLabel}</div>
+    <div class="hist-date-line"></div>
+   <div class="hist-date-record">
+  <span class="w">${g.w}W</span>&nbsp;<span class="l">${g.l}L</span>${(g.p ? '&nbsp;<span class="p">'+g.p+'P</span>' : '')}&nbsp;
+  ${(decided2>0 ? '<span style="color:var(--accent)">'+Math.round(g.w/decided2*100)+'%</span>' : '')}
+</div>
+  </div>
+  <div class="hist-grid">`;
     group.sort((a,b)=>b.madeAt-a.madeAt).forEach(p=>{
       const resultIcon=p.result==='won'?'✓':p.result==='lost'?'✕':'↔';
       const pnlVal = p.result==='won'&&p.wager ? `+$${calcPayout(p.wager,p.odds||-110)}` : p.result==='lost'&&p.wager ? `-$${p.wager}` : '';
@@ -2831,7 +2830,7 @@ ${typeof settlementAuditHTML === 'function' ? settlementAuditHTML(p) : ''}
   });
 
   el.innerHTML=html;
-
+}
 
 function openPanel(){checkPickResults();checkPropPickResults();checkParlayResults();renderPicksPanel();updateRecordUI();document.getElementById('picksPanel').classList.add('open');document.getElementById('panelOverlay').classList.add('open');}
 function closePanel(){document.getElementById('picksPanel').classList.remove('open');document.getElementById('panelOverlay').classList.remove('open');}
