@@ -7484,26 +7484,29 @@ let picksRealtimeSub = null;
 
 function startPicksRealtime() {
   try {
-    if (!supabase || !currentUser?.id) return;
+    if (!supabase) return;
 
     // Ensure only 1 subscription
     stopPicksRealtime();
 
+    // One shared channel for all clients
     picksRealtimeSub = supabase
-      .channel(`user_picks_${currentUser.id}`)
+      .channel('user_picks_realtime')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'user_picks',
-          filter: `user_id=eq.${currentUser.id}`
+          table: 'user_picks'
+          // ✅ NO filter — we want all pick changes to broadcast to all browsers
         },
         async (payload) => {
           console.log('Realtime user_picks event:', payload);
 
+          // Always sync latest from DB
           await syncPicksFromServer(false);
 
+          // Refresh UI
           renderPicksPanel();
           updateRecordUI();
           renderScores?.();
@@ -7519,7 +7522,13 @@ function startPicksRealtime() {
 }
 
 function stopPicksRealtime() {
-  try { picksRealtimeSub?.unsubscribe?.(); } catch {}
+  try {
+    if (picksRealtimeSub) {
+      supabase.removeChannel(picksRealtimeSub); // ✅ correct cleanup
+    }
+  } catch (e) {
+    console.warn('stopPicksRealtime error:', e?.message || e);
+  }
   picksRealtimeSub = null;
 }
 // ═══════════════════════════════════════════════════════
@@ -8541,22 +8550,28 @@ async function initUserWithAuth() {
 
   // 2. Try to restore Supabase session
   const restored = await restoreAuthSession();
-  if(restored && currentUser) {
-    picks = loadPicks();
-    applyUser();
-    document.getElementById('nameModalOverlay').classList.add('hidden');
-    return;
-  }
+if (restored && currentUser) {
+  picks = loadPicks();
+  applyUser();
+
+  startPicksRealtime();   // ADD THIS
+
+  document.getElementById('nameModalOverlay').classList.add('hidden');
+  return;
+}
 
   // 3. Fall back to saved guest/local user
   const u = loadUser();
-  if(u && u.name) {
-    currentUser = u;
-    picks = loadPicks();
-    applyUser();
-    document.getElementById('nameModalOverlay').classList.add('hidden');
-    return;
-  }
+ if (u && u.name) {
+  currentUser = u;
+  picks = loadPicks();
+  applyUser();
+
+  startPicksRealtime();   // ADD THIS
+
+  document.getElementById('nameModalOverlay').classList.add('hidden');
+  return;
+}
 
   // 4. Show auth modal — default to signup for new users
   switchAuthTab('signup');
