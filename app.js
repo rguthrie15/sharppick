@@ -2150,20 +2150,53 @@ async function publishToLeaderboard(){ return; }
 
 async function fetchLeaderboard(){
   try{
-    const data=null; // legacy leaderboard disabled
-    if(data && data.length){
-      return data.map(r=>({
+
+    const rows = await sbSelect(
+      'user_ratings',
+      'select=user_id,sharp_rating_90,win_rate_90,roi_90,units_90,picks_90,pending_90,all_time_singles,top_sport,top_sport_rating,cur_streak,avg_odds_last10,is_provisional&order=sharp_rating_90.desc.nullslast'
+    );
+
+    if(!rows || !rows.length) return [];
+
+    return rows.map(r=>{
+
+      const sharp = Number(r.sharp_rating_90 ?? 0);
+
+      let tier = "Rookie";
+      if(sharp >= 85 && r.picks_90 >= 100) tier = "Elite";
+      else if(sharp >= 70) tier = "Pro";
+      else if(sharp >= 55) tier = "Sharp";
+      else if(sharp >= 40) tier = "Solid";
+
+      return{
         id: r.user_id,
-        name: r.name,
-        w: r.w||0, l: r.l||0, p: r.p||0, total: r.total||0,
-        lastPick: r.last_pick||0,
-        recentPicks: r.recent_picks||[],
-        bankroll: r.bankroll||1000,
-        pnl: r.pnl||0,
-        lockW: r.lock_w||0,
-        lockL: r.lock_l||0,
-      }));
-    }
+
+        sharp,
+        tier,
+
+        winRate: r.win_rate_90 ?? 0,
+        roi: r.roi_90 ?? 0,
+        units: r.units_90 ?? 0,
+
+        picks: r.picks_90 ?? 0,
+        pending: r.pending_90 ?? 0,
+
+        record: r.all_time_singles ?? "0-0-0",
+
+        topSport: r.top_sport ?? "",
+        sportRating: r.top_sport_rating ?? 0,
+
+        streak: r.cur_streak ?? "",
+        avgOdds: r.avg_odds_last10 ?? ""
+      };
+
+    });
+
+  }catch(e){
+    console.warn("Leaderboard load failed", e);
+    return [];
+  }
+}
   }catch(e){ if(supaOnline!==false) console.warn('Leaderboard fetch failed:',e?.message); }
   // Fallback: localStorage
   const entries=[];
@@ -7503,6 +7536,7 @@ function initPickSyncChannels(){
         updateRecordUI?.();
         renderScores?.();
         renderHistoryView?.();
+        renderLeaderboardView?.();
       };
     }
 
