@@ -2,6 +2,11 @@
 // - Verifies the caller via Supabase Auth access token
 // - Upserts provided picks into user_picks table (forced user_id)
 // - Recomputes user_ratings snapshot used by leaderboard/profile RPCs
+//
+// IMPORTANT (matches your current DB schema):
+// - user_picks.made_at and user_picks.settled_at are BIGINT (epoch ms)
+// - user_picks.updated_at / created_at are timestamptz with defaults (now())
+// - leaderboard.updated_at is timestamptz with default (now())
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -23,32 +28,20 @@ function toNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-function profitFromOdds(risk, odds) {
-  const o = toNum(odds, 0);
-  const r = toNum(risk, 0);
-  if (!o || !r) return 0;
-  if (o > 0) return r * (o / 100);
-  return r * (100 / Math.abs(o));
-}
-
-function pickResult(p) {
-  return String(p?.result || p?.status || "pending").toLowerCase();
-}
-
-function pickIsParlay(p) {
-  return Boolean(p?.is_parlay) || p?.type === "parlay" || Array.isArray(p?.parlay_legs);
-}
-
 /**
- * Convert to epoch ms for INTERNAL calculations only (ratings/streaks).
- * Accepts number/bigint/string/ISO/pg timestamptz.
+ * Returns epoch milliseconds as a Number.
+ * Accepts:
+ * - number/bigint (epoch ms or epoch sec)
+ * - numeric string
+ * - ISO strings
+ * - Postgres timestamptz strings like "2026-03-04 00:07:33.090991+00"
  */
 function toEpochMs(v) {
   if (v == null) return null;
 
   if (typeof v === "number") {
     if (!Number.isFinite(v)) return null;
-    // treat small numbers as seconds
+    // if seconds-like, convert to ms
     if (v > 0 && v < 2e9) return Math.round(v * 1000);
     return Math.round(v);
   }
@@ -72,15 +65,32 @@ function toEpochMs(v) {
 
     // Normalize common Postgres timestamptz formats to ISO
     let iso = s.replace(" ", "T");
-    iso = iso.replace(/([+-]00)$/i, "Z"); // "+00" -> "Z"
-    iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"); // "+0000" -> "+00:00"
-    iso = iso.replace(/\+00:00$/i, "Z"); // "+00:00" -> "Z"
-    iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2"); // trim fractional to 3 digits
+
+    // "+00" -> "Z"
+    iso = iso.replace(/([+-]00)$/i, "Z");
+
+    // "+0000" -> "+00:00"
+    iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+
+    // "+00:00" -> "Z"
+    iso = iso.replace(/\+00:00$/i, "Z");
+
+    // trim fractional seconds to 3 digits (JS parsing safety)
+    iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2");
+
     const ms = Date.parse(iso);
     return Number.isFinite(ms) ? ms : null;
   }
 
   return null;
+}
+
+function profitFromOdds(risk, odds) {
+  const o = toNum(odds, 0);
+  const r = toNum(risk, 0);
+  if (!o || !r) return 0;
+  if (o > 0) return r * (o / 100);
+  return r * (100 / Math.abs(o));
 }
 
 function pickMadeAtMs(p) {
@@ -91,6 +101,14 @@ function pickMadeAtMs(p) {
     toEpochMs(p?.createdAt) ??
     toEpochMs(p?.ts);
   return ms ?? 0;
+}
+
+function pickResult(p) {
+  return String(p?.result || p?.status || "pending").toLowerCase();
+}
+
+function pickIsParlay(p) {
+  return Boolean(p?.is_parlay) || p?.type === "parlay" || Array.isArray(p?.parlay_legs);
 }
 
 function computeStreak(settledDesc) {
@@ -232,7 +250,7 @@ function computeRatingsFromRows(rows) {
 
 async function supa(path, { method = "GET", headers = {}, body } = {}) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_ROLE_KEY");
   }
   const url = `${SUPABASE_URL}${path}`;
   const res = await fetch(url, {
@@ -277,40 +295,33 @@ async function verifyUser(accessToken) {
 /**
  * Normalize pick rows for DB writes.
  * IMPORTANT:
- * - user_picks.updated_at is now timestamptz: do NOT write epoch ms.
- * - Use ISO strings for made_at/settled_at if present, otherwise omit.
- * - Let Postgres defaults/triggers handle updated_at.
+ * - user_picks.made_at and user_picks.settled_at are BIGINT (epoch ms)
+ * - do NOT send updated_at / created_at (DB defaults handle them)
  */
 function normalizePickForDb(p) {
-  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
 
-  const made =
-    p?.made_at ||
-    p?.madeAt ||
-    p?.created_at ||
-    p?.createdAt ||
-    p?.ts ||
-    nowIso;
+  const madeMs =
+    toEpochMs(p?.made_at) ??
+    toEpochMs(p?.madeAt) ??
+    toEpochMs(p?.created_at) ??
+    toEpochMs(p?.createdAt) ??
+    toEpochMs(p?.ts) ??
+    nowMs;
 
-  const settled =
-    p?.settled_at ||
-    p?.settledAt ||
-    p?.settled_on ||
-    p?.settledOn ||
+  const settledMs =
+    toEpochMs(p?.settled_at) ??
+    toEpochMs(p?.settledAt) ??
+    toEpochMs(p?.settled_on) ??
+    toEpochMs(p?.settledOn) ??
     null;
 
-  // Drop created_at/updated_at to avoid mismatches (DB defaults handle them)
   const { created_at, updated_at, ...rest } = p;
 
   return {
     ...rest,
-    made_at: typeof made === "number" ? new Date(made).toISOString() : String(made),
-    settled_at:
-      settled == null
-        ? null
-        : typeof settled === "number"
-          ? new Date(settled).toISOString()
-          : String(settled),
+    made_at: madeMs,
+    settled_at: settledMs,
   };
 }
 
@@ -357,7 +368,7 @@ exports.handler = async (event) => {
     );
 
     const stats = computeRatingsFromRows(userRows);
-    const calculated_at = new Date().toISOString(); // timestamptz
+    const calculated_at = new Date().toISOString(); // timestamptz (matches your user_ratings schema)
 
     // Upsert into user_ratings (snapshot)
     const ratingRow = { user_id: user.id, calculated_at, ...stats };
@@ -370,7 +381,7 @@ exports.handler = async (event) => {
       body: JSON.stringify([ratingRow]),
     });
 
-    // Name map / heartbeat in leaderboard
+    // Name map / heartbeat in leaderboard (updated_at default now())
     if (name) {
       try {
         await supa(`/rest/v1/leaderboard?on_conflict=user_id`, {
@@ -379,7 +390,6 @@ exports.handler = async (event) => {
             "content-type": "application/json",
             Prefer: "resolution=merge-duplicates",
           },
-          // Let DB default updated_at = now() handle timestamps
           body: JSON.stringify([{ user_id: user.id, name }]),
         });
       } catch {
