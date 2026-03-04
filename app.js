@@ -4749,6 +4749,7 @@ fetchDate(selDate).then(()=>{
           const lb = await r.json();
           markSupaOk();
           console.log('✅ Supabase connected, leaderboard rows:',lb?.length??0);
+          startPicksRealtime();
         } else {
           throw new Error(`HTTP ${r.status}`);
         }
@@ -7484,6 +7485,7 @@ let picksRealtimeSub = null;
 
 function startPicksRealtime() {
   try {
+    console.log('🔥 startPicksRealtime called', { supabase: !!supabase, currentUser });
     if (!supabase) return;
 
     // Ensure only 1 subscription
@@ -7526,13 +7528,10 @@ function startPicksRealtime() {
 
 function stopPicksRealtime() {
   try {
-    if (picksRealtimeSub) {
-      supabase.removeChannel(picksRealtimeSub); // ✅ correct cleanup
-    }
-  } catch (e) {
-    console.warn('stopPicksRealtime error:', e?.message || e);
-  }
+    if (picksRealtimeSub) supabase.removeChannel(picksRealtimeSub);
+  } catch {}
   picksRealtimeSub = null;
+
 }
 // ═══════════════════════════════════════════════════════
 // APP HERO
