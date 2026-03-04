@@ -8188,6 +8188,8 @@ function submitGuest() {
   if(!uid){ uid='guest_'+Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem('ls_uid',uid); }
   currentUser = { name, id: uid, isGuest: true };
   saveUser(currentUser);
+  await syncPicksFromServer(true);
+startPicksRealtime();
   document.getElementById('nameModalOverlay').classList.add('hidden');
   applyUser();
 }
