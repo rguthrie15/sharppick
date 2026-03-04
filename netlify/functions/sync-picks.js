@@ -1,9 +1,9 @@
 // Netlify Function: Sync picks server-side to Supabase (service role)
-// - Verifies the caller via Supabase Auth access token
+// - Verifies caller via Supabase Auth access token
 // - Upserts provided picks into user_picks table (forced user_id)
 // - Recomputes user_ratings snapshot used by leaderboard/profile RPCs
 //
-// IMPORTANT (matches your current DB schema):
+// IMPORTANT (matches your DB schema):
 // - user_picks.made_at and user_picks.settled_at are BIGINT (epoch ms)
 // - user_picks.updated_at / created_at are timestamptz with defaults (now())
 // - leaderboard.updated_at is timestamptz with default (now())
@@ -28,15 +28,8 @@ function toNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-// --- NEW: ensure every pick has a safe unique id (prevents overwrites) ---
-function isUuidLike(id) {
-  return (
-    typeof id === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
-  );
-}
-
 function makeId() {
+  // Netlify Node 18 supports crypto.randomUUID()
   return globalThis.crypto?.randomUUID
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -55,9 +48,8 @@ function toEpochMs(v) {
 
   if (typeof v === "number") {
     if (!Number.isFinite(v)) return null;
-    // if seconds-like, convert to ms
-    if (v > 0 && v < 2e9) return Math.round(v * 1000);
-    return Math.round(v);
+    if (v > 0 && v < 2e9) return Math.round(v * 1000); // seconds -> ms
+    return Math.round(v); // assume ms
   }
 
   if (typeof v === "bigint") {
@@ -79,18 +71,10 @@ function toEpochMs(v) {
 
     // Normalize common Postgres timestamptz formats to ISO
     let iso = s.replace(" ", "T");
-
-    // "+00" -> "Z"
-    iso = iso.replace(/([+-]00)$/i, "Z");
-
-    // "+0000" -> "+00:00"
-    iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
-
-    // "+00:00" -> "Z"
-    iso = iso.replace(/\+00:00$/i, "Z");
-
-    // trim fractional seconds to 3 digits (JS parsing safety)
-    iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2");
+    iso = iso.replace(/([+-]00)$/i, "Z"); // "+00" -> "Z"
+    iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"); // "+0000" -> "+00:00"
+    iso = iso.replace(/\+00:00$/i, "Z"); // "+00:00" -> "Z"
+    iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2"); // trim fractional to 3 digits
 
     const ms = Date.parse(iso);
     return Number.isFinite(ms) ? ms : null;
@@ -117,8 +101,19 @@ function pickMadeAtMs(p) {
   return ms ?? 0;
 }
 
+// ✅ Normalize result strings so "win" counts as "won"
 function pickResult(p) {
-  return String(p?.result || p?.status || "pending").toLowerCase();
+  const r = String(p?.result || p?.status || "pending").toLowerCase().trim();
+
+  if (r === "win") return "won";
+  if (r === "won") return "won";
+  if (r === "loss") return "lost";
+  if (r === "lost") return "lost";
+  if (r === "push" || r === "pushed") return "push";
+  if (r === "cancelled") return "canceled";
+  if (r === "canceled") return "canceled";
+
+  return r;
 }
 
 function pickIsParlay(p) {
@@ -131,8 +126,10 @@ function computeStreak(settledDesc) {
   for (const p of settledDesc) {
     const r = pickResult(p);
     if (r === "push" || r === "canceled") continue;
+
     const d = r === "won" ? "W" : r === "lost" ? "L" : null;
     if (!d) continue;
+
     if (!dir) {
       dir = d;
       n = 1;
@@ -162,6 +159,7 @@ function computeRatingsFromRows(rows) {
 
     for (const pk of list) {
       const r = pickResult(pk);
+
       if (r === "pending") {
         pend++;
         continue;
@@ -308,8 +306,7 @@ async function verifyUser(accessToken) {
 
 /**
  * Normalize pick rows for DB writes.
- * IMPORTANT:
- * - user_picks.made_at and user_picks.settled_at are BIGINT (epoch ms)
+ * - made_at, settled_at are BIGINT epoch ms
  * - do NOT send updated_at / created_at (DB defaults handle them)
  */
 function normalizePickForDb(p) {
@@ -355,23 +352,25 @@ exports.handler = async (event) => {
     const picks = Array.isArray(payload.picks) ? payload.picks : [];
     const name = String(payload.name || payload.displayName || payload.email || "").slice(0, 80);
 
-    // Upsert picks (force safe UUID ids so rows don't overwrite)
+    // ✅ Upsert picks
+    // IMPORTANT: Do NOT replace/change ids (that creates duplicates).
+    // Only generate an id if it's missing.
     if (picks.length) {
       const rows = picks
         .filter((r) => r)
         .map((r) => {
-          const safeId = isUuidLike(r.id) ? r.id : makeId();
+          const safeId = r.id ? String(r.id) : makeId();
           return {
             ...normalizePickForDb({ ...r, id: safeId }),
             user_id: user.id,
           };
         });
 
-      // Optional: prevent duplicate ids inside a single payload
+      // De-dupe within a single payload by id
       const seen = new Set();
       const deduped = [];
       for (const row of rows) {
-        if (!row.id) continue;
+        if (!row?.id) continue;
         if (seen.has(row.id)) continue;
         seen.add(row.id);
         deduped.push(row);
@@ -408,7 +407,7 @@ exports.handler = async (event) => {
       body: JSON.stringify([ratingRow]),
     });
 
-    // Name map / heartbeat in leaderboard (updated_at default now())
+    // Name map / heartbeat in leaderboard
     if (name) {
       try {
         await supa(`/rest/v1/leaderboard?on_conflict=user_id`, {
@@ -420,7 +419,7 @@ exports.handler = async (event) => {
           body: JSON.stringify([{ user_id: user.id, name }]),
         });
       } catch {
-        // ignore if table/columns don't exist
+        // ignore
       }
     }
 
