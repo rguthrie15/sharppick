@@ -23,21 +23,32 @@ function toNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
+function profitFromOdds(risk, odds) {
+  const o = toNum(odds, 0);
+  const r = toNum(risk, 0);
+  if (!o || !r) return 0;
+  if (o > 0) return r * (o / 100);
+  return r * (100 / Math.abs(o));
+}
+
+function pickResult(p) {
+  return String(p?.result || p?.status || "pending").toLowerCase();
+}
+
+function pickIsParlay(p) {
+  return Boolean(p?.is_parlay) || p?.type === "parlay" || Array.isArray(p?.parlay_legs);
+}
+
 /**
- * Returns epoch milliseconds as a Number (for bigint columns).
- * Accepts:
- * - number/bigint (epoch ms or epoch sec)
- * - numeric string
- * - ISO strings
- * - Postgres timestamptz strings like "2026-03-04 00:07:33.090991+00"
+ * Convert to epoch ms for INTERNAL calculations only (ratings/streaks).
+ * Accepts number/bigint/string/ISO/pg timestamptz.
  */
 function toEpochMs(v) {
   if (v == null) return null;
 
   if (typeof v === "number") {
     if (!Number.isFinite(v)) return null;
-    // if seconds-like, convert to ms
-    if (v > 0 && v < 2e10) return Math.round(v);
+    // treat small numbers as seconds
     if (v > 0 && v < 2e9) return Math.round(v * 1000);
     return Math.round(v);
   }
@@ -51,7 +62,7 @@ function toEpochMs(v) {
     const s = v.trim();
     if (!s) return null;
 
-    // numeric string
+    // numeric string (seconds or ms)
     if (/^\d+$/.test(s)) {
       const n = Number(s);
       if (!Number.isFinite(n)) return null;
@@ -61,19 +72,10 @@ function toEpochMs(v) {
 
     // Normalize common Postgres timestamptz formats to ISO
     let iso = s.replace(" ", "T");
-
-    // "+00" -> "Z"
-    iso = iso.replace(/([+-]00)$/i, "Z");
-
-    // "+0000" -> "+00:00"
-    iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
-
-    // "+00:00" -> "Z"
-    iso = iso.replace(/\+00:00$/i, "Z");
-
-    // trim fractional seconds to 3 digits (JS parsing safety)
-    iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2");
-
+    iso = iso.replace(/([+-]00)$/i, "Z"); // "+00" -> "Z"
+    iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2"); // "+0000" -> "+00:00"
+    iso = iso.replace(/\+00:00$/i, "Z"); // "+00:00" -> "Z"
+    iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2"); // trim fractional to 3 digits
     const ms = Date.parse(iso);
     return Number.isFinite(ms) ? ms : null;
   }
@@ -81,15 +83,7 @@ function toEpochMs(v) {
   return null;
 }
 
-function profitFromOdds(risk, odds) {
-  const o = toNum(odds, 0);
-  const r = toNum(risk, 0);
-  if (!o || !r) return 0;
-  if (o > 0) return r * (o / 100);
-  return r * (100 / Math.abs(o));
-}
-
-function pickMadeAt(p) {
+function pickMadeAtMs(p) {
   const ms =
     toEpochMs(p?.made_at) ??
     toEpochMs(p?.created_at) ??
@@ -97,14 +91,6 @@ function pickMadeAt(p) {
     toEpochMs(p?.createdAt) ??
     toEpochMs(p?.ts);
   return ms ?? 0;
-}
-
-function pickResult(p) {
-  return String(p?.result || p?.status || "pending").toLowerCase();
-}
-
-function pickIsParlay(p) {
-  return Boolean(p?.is_parlay) || p?.type === "parlay" || Array.isArray(p?.parlay_legs);
 }
 
 function computeStreak(settledDesc) {
@@ -128,10 +114,10 @@ function computeStreak(settledDesc) {
 }
 
 function computeRatingsFromRows(rows) {
-  const all = (rows || []).slice().sort((a, b) => pickMadeAt(b) - pickMadeAt(a));
+  const all = (rows || []).slice().sort((a, b) => pickMadeAtMs(b) - pickMadeAtMs(a));
   const now = Date.now();
   const cutoff90 = now - 90 * 864e5;
-  const is90 = (p) => pickMadeAt(p) >= cutoff90;
+  const is90 = (p) => pickMadeAtMs(p) >= cutoff90;
 
   function agg(list) {
     let w = 0,
@@ -221,7 +207,7 @@ function computeRatingsFromRows(rows) {
       const r = pickResult(p);
       return r !== "pending" && r !== "canceled";
     })
-    .sort((a, b) => pickMadeAt(b) - pickMadeAt(a));
+    .sort((a, b) => pickMadeAtMs(b) - pickMadeAtMs(a));
 
   return {
     sharp_rating_90: Number(rating.toFixed(1)),
@@ -288,39 +274,43 @@ async function verifyUser(accessToken) {
   return await res.json();
 }
 
+/**
+ * Normalize pick rows for DB writes.
+ * IMPORTANT:
+ * - user_picks.updated_at is now timestamptz: do NOT write epoch ms.
+ * - Use ISO strings for made_at/settled_at if present, otherwise omit.
+ * - Let Postgres defaults/triggers handle updated_at.
+ */
 function normalizePickForDb(p) {
-  const nowMs = Date.now();
+  const nowIso = new Date().toISOString();
 
   const made =
-    toEpochMs(p?.made_at) ??
-    toEpochMs(p?.madeAt) ??
-    toEpochMs(p?.created_at) ??
-    toEpochMs(p?.createdAt) ??
-    toEpochMs(p?.ts) ??
-    nowMs;
+    p?.made_at ||
+    p?.madeAt ||
+    p?.created_at ||
+    p?.createdAt ||
+    p?.ts ||
+    nowIso;
 
   const settled =
-    toEpochMs(p?.settled_at) ??
-    toEpochMs(p?.settledAt) ??
-    toEpochMs(p?.settled_on) ??
-    toEpochMs(p?.settledOn) ??
+    p?.settled_at ||
+    p?.settledAt ||
+    p?.settled_on ||
+    p?.settledOn ||
     null;
 
-  const updated =
-    toEpochMs(p?.updated_at) ??
-    toEpochMs(p?.updatedAt) ??
-    toEpochMs(p?.updated_on) ??
-    toEpochMs(p?.updatedOn) ??
-    nowMs;
-
-  // Drop created_at to avoid accidental type mismatch (DB has created_at timestamptz default)
-  const { created_at, ...rest } = p;
+  // Drop created_at/updated_at to avoid mismatches (DB defaults handle them)
+  const { created_at, updated_at, ...rest } = p;
 
   return {
     ...rest,
-    made_at: made,
-    settled_at: settled,
-    updated_at: updated,
+    made_at: typeof made === "number" ? new Date(made).toISOString() : String(made),
+    settled_at:
+      settled == null
+        ? null
+        : typeof settled === "number"
+          ? new Date(settled).toISOString()
+          : String(settled),
   };
 }
 
@@ -367,7 +357,7 @@ exports.handler = async (event) => {
     );
 
     const stats = computeRatingsFromRows(userRows);
-    const calculated_at = new Date().toISOString(); // timestamptz (matches your schema)
+    const calculated_at = new Date().toISOString(); // timestamptz
 
     // Upsert into user_ratings (snapshot)
     const ratingRow = { user_id: user.id, calculated_at, ...stats };
@@ -389,8 +379,8 @@ exports.handler = async (event) => {
             "content-type": "application/json",
             Prefer: "resolution=merge-duplicates",
           },
-          // IMPORTANT: leaderboard.updated_at is BIGINT in your schema
-          body: JSON.stringify([{ user_id: user.id, name, updated_at: Date.now() }]),
+          // Let DB default updated_at = now() handle timestamps
+          body: JSON.stringify([{ user_id: user.id, name }]),
         });
       } catch {
         // ignore if table/columns don't exist
@@ -399,6 +389,10 @@ exports.handler = async (event) => {
 
     return json(200, { ok: true, user_id: user.id, stats });
   } catch (e) {
-    return json(500, { error: e?.message || "Server error", status: e?.status || null, data: e?.data || null });
+    return json(500, {
+      error: e?.message || "Server error",
+      status: e?.status || null,
+      data: e?.data || null,
+    });
   }
 };
