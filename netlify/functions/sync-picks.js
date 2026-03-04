@@ -10,7 +10,6 @@ const json = (statusCode, body, extraHeaders = {}) => ({
   statusCode,
   headers: {
     "content-type": "application/json; charset=utf-8",
-    // CORS (same-origin on Netlify, but keep permissive for safety)
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "content-type, authorization",
     "access-control-allow-methods": "POST, OPTIONS",
@@ -24,12 +23,67 @@ function toNum(v, d = 0) {
   return Number.isFinite(n) ? n : d;
 }
 
-// Converts an ISO/timestamp string OR number into epoch milliseconds (bigint-friendly)
+/**
+ * Accepts:
+ * - bigint/number (epoch ms or sec)
+ * - ISO string
+ * - Postgres timestamptz string like "2026-03-03 23:10:08.97272+00"
+ * Returns epoch milliseconds (number) or null
+ */
 function toEpochMs(v) {
-  if (v == null || v === "") return null;
-  if (typeof v === "number") return v; // already epoch ms
-  const n = Date.parse(v); // parse ISO string
-  return Number.isFinite(n) ? n : null;
+  if (v == null) return null;
+
+  // already numeric
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return null;
+    // if looks like seconds, convert to ms
+    if (v > 0 && v < 2e10) return v; // ms typical ~ 1.7e12; seconds ~ 1.7e9
+    if (v > 0 && v < 2e9) return Math.round(v * 1000);
+    return Math.round(v);
+  }
+  if (typeof v === "bigint") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // strings
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return null;
+
+    // numeric string
+    if (/^\d+$/.test(s)) {
+      const n = Number(s);
+      if (!Number.isFinite(n)) return null;
+      if (n > 0 && n < 2e9) return Math.round(n * 1000);
+      return Math.round(n);
+    }
+
+    // Normalize common Postgres timestamptz formats to ISO:
+    // "YYYY-MM-DD HH:MM:SS.ffffff+00" -> "YYYY-MM-DDTHH:MM:SS.ffffffZ"
+    // "YYYY-MM-DD HH:MM:SS+00"        -> "YYYY-MM-DDTHH:MM:SSZ"
+    let iso = s;
+
+    // space -> T
+    iso = iso.replace(" ", "T");
+
+    // timezone +00 or -05 -> Z / +00:00 / -05:00
+    // if ends with +00 or -00 => Z
+    iso = iso.replace(/([+-]00)$/i, "Z");
+    // if ends with +00:00 already, ok. if ends with +00?? no colon, add :00
+    iso = iso.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+
+    // If we now end with "+00:00", convert to Z
+    iso = iso.replace(/\+00:00$/i, "Z");
+
+    // Date.parse can choke on >3 fractional digits sometimes; trim to 3
+    iso = iso.replace(/\.(\d{3})\d+(Z|[+-]\d{2}:\d{2})$/, ".$1$2");
+
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  return null;
 }
 
 function profitFromOdds(risk, odds) {
@@ -41,14 +95,14 @@ function profitFromOdds(risk, odds) {
 }
 
 function pickMadeAt(p) {
-  // Prefer bigint made_at, but allow legacy fields
-  const t = p?.made_at ?? p?.created_at ?? p?.madeAt ?? p?.createdAt ?? p?.ts;
-  if (!t) return 0;
-  if (typeof t === "string") {
-    const n = Date.parse(t);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return toNum(t, 0);
+  // Prefer your table’s bigint made_at
+  const ms =
+    toEpochMs(p?.made_at) ??
+    toEpochMs(p?.created_at) ??
+    toEpochMs(p?.madeAt) ??
+    toEpochMs(p?.createdAt) ??
+    toEpochMs(p?.ts);
+  return ms ?? 0;
 }
 
 function pickResult(p) {
@@ -56,7 +110,7 @@ function pickResult(p) {
 }
 
 function pickIsParlay(p) {
-  return Boolean(p?.is_parlay) || p?.pick_type === "parlay" || Array.isArray(p?.legs) || Array.isArray(p?.parlay_legs);
+  return Boolean(p?.is_parlay) || p?.type === "parlay" || Array.isArray(p?.parlay_legs);
 }
 
 function computeStreak(settledDesc) {
@@ -96,7 +150,6 @@ function computeRatingsFromRows(rows) {
 
     for (const pk of list) {
       const r = pickResult(pk);
-
       if (r === "pending") {
         pend++;
         continue;
@@ -127,7 +180,6 @@ function computeRatingsFromRows(rows) {
     const winRate = (w / denom) * 100;
     const roi = risk ? (profit / risk) * 100 : 0;
     const units = profit / 50;
-
     return { w, l, push, pend, decided, risk, profit, winRate, roi, units };
   }
 
@@ -155,7 +207,7 @@ function computeRatingsFromRows(rows) {
   for (const pk of singles90) {
     const r = pickResult(pk);
     if (r === "pending" || r === "canceled") continue;
-    const lg = pk?.league || pk?.sport || "other";
+    const lg = pk?.league || "other";
     byLeague[lg] = (byLeague[lg] || 0) + 1;
   }
   const topSport = Object.entries(byLeague).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
@@ -231,15 +283,35 @@ async function supa(path, { method = "GET", headers = {}, body } = {}) {
 }
 
 async function verifyUser(accessToken) {
-  // Verify via Supabase Auth API (use the user's access token)
   const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
     headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      authorization: `Bearer ${accessToken}`,
+      apikey: SUPABASE_SERVICE_ROLE_KEY, // ok for auth verify
+      authorization: `Bearer ${accessToken}`, // user's access token
     },
   });
   if (!res.ok) return null;
   return await res.json();
+}
+
+// Force bigint fields into epoch ms
+function normalizePickForDb(p) {
+  const made =
+    toEpochMs(p?.made_at) ??
+    toEpochMs(p?.created_at) ??
+    toEpochMs(p?.madeAt) ??
+    toEpochMs(p?.createdAt) ??
+    Date.now();
+
+  const settled = toEpochMs(p?.settled_at) ?? toEpochMs(p?.settledAt) ?? null;
+  const updated = toEpochMs(p?.updated_at) ?? toEpochMs(p?.updatedAt) ?? Date.now();
+
+  // IMPORTANT: ensure we don't accidentally pass string timestamps into BIGINT cols
+  return {
+    ...p,
+    made_at: made,
+    settled_at: settled,
+    updated_at: updated,
+  };
 }
 
 exports.handler = async (event) => {
@@ -258,30 +330,13 @@ exports.handler = async (event) => {
     const picks = Array.isArray(payload.picks) ? payload.picks : [];
     const name = String(payload.name || payload.displayName || payload.email || "").slice(0, 80);
 
-    // Upsert picks (force user_id) + normalize bigint timestamps
     if (picks.length) {
-      const nowMs = Date.now();
-
       const rows = picks
         .filter((r) => r && r.id)
-        .map((r) => {
-          const made = r.made_at ?? r.madeAt ?? r.created_at ?? r.createdAt ?? r.ts;
-          const settled = r.settled_at ?? r.settledAt ?? r.settled_on ?? r.settledOn;
-          const updated = r.updated_at ?? r.updatedAt ?? r.updated_on ?? r.updatedOn;
-
-          // Avoid accidentally pushing created_at strings into Supabase
-          const { created_at, ...rest } = r;
-
-          return {
-            ...rest,
-            user_id: user.id,
-
-            // BIGINT columns MUST be epoch ms
-            made_at: toEpochMs(made) ?? nowMs,
-            settled_at: toEpochMs(settled),
-            updated_at: toEpochMs(updated) ?? nowMs,
-          };
-        });
+        .map((r) => ({
+          ...normalizePickForDb(r),
+          user_id: user.id,
+        }));
 
       if (rows.length) {
         await supa(`/rest/v1/user_picks?on_conflict=id`, {
@@ -305,7 +360,6 @@ exports.handler = async (event) => {
 
     // Upsert into user_ratings (snapshot)
     const ratingRow = { user_id: user.id, calculated_at, ...stats };
-
     await supa(`/rest/v1/user_ratings?on_conflict=user_id`, {
       method: "POST",
       headers: {
@@ -315,7 +369,7 @@ exports.handler = async (event) => {
       body: JSON.stringify([ratingRow]),
     });
 
-    // Optional: keep a name map in leaderboard table (best-effort)
+    // Best-effort name map
     if (name) {
       try {
         await supa(`/rest/v1/leaderboard?on_conflict=user_id`, {
@@ -326,13 +380,16 @@ exports.handler = async (event) => {
           },
           body: JSON.stringify([{ user_id: user.id, name, updated_at: calculated_at }]),
         });
-      } catch {
-        // ignore if table/columns don't exist
-      }
+      } catch {}
     }
 
     return json(200, { ok: true, user_id: user.id, stats });
   } catch (e) {
-    return json(500, { error: e?.message || "Server error" });
+    // Return enough to debug without leaking secrets
+    return json(500, {
+      error: e?.message || "Server error",
+      status: e?.status || null,
+      data: e?.data || null,
+    });
   }
 };
