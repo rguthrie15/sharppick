@@ -8186,12 +8186,14 @@ function submitGuest() {
   // Guest mode: use localStorage UID like before, no Supabase auth
   let uid = localStorage.getItem('ls_uid');
   if(!uid){ uid='guest_'+Math.random().toString(36).slice(2)+Date.now().toString(36); localStorage.setItem('ls_uid',uid); }
-  currentUser = { name, id: uid, isGuest: true };
-  saveUser(currentUser);
-  await syncPicksFromServer(true);
-startPicksRealtime();
-  document.getElementById('nameModalOverlay').classList.add('hidden');
-  applyUser();
+currentUser = { name, id: uid, isGuest: true };
+saveUser(currentUser);
+applyUser();                 // update UI state first
+syncPicksFromServer(true);   // pull latest
+startPicksRealtime();        // start realtime
+  
+document.getElementById('nameModalOverlay').classList.add('hidden');
+  
 }
 
 async function handleAuthSession(session, displayName) {
