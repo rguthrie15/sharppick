@@ -2693,7 +2693,7 @@ function clearAllPicks(){
       renderScores();
     }
   );
-}
+
   // Filter bar HTML
   const filterBar = `<div class="hist-filter-bar">
     <input class="hist-search" type="text" placeholder="🔍 Search picks…" value="${histSearch}"
