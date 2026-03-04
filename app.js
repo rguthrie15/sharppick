@@ -2285,7 +2285,6 @@ async function renderLeaderboardPro(){
 
   el.innerHTML = header + table;
 }
-  }catch(e){ if(supaOnline!==false) console.warn('Leaderboard fetch failed:',e?.message); }
   // Fallback: localStorage
   const entries=[];
   try{
