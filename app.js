@@ -1089,7 +1089,7 @@ function setMode(m){
   // Render as needed
   if(m==='calendar') renderCalendar();
   if(m==='history') renderHistoryView();
-  if(m==='leaderboard') renderLeaderboardView();
+  if(m==='leaderboard') renderLeaderboardPro();
   if(m==='news') renderNewsView();
   if(m==='analysis') renderAnalysisView();
   if(m==='contests') renderContestsView();
@@ -2146,56 +2146,144 @@ async function sbUpsert(table, row){
 // SharpPick now uses the Sharp Rating leaderboards (RPC: get_leaderboard_90 / get_leaderboard_90_provisional).
 // Keep this as a no-op to avoid any writes to the legacy public.leaderboard table.
 async function publishToLeaderboard(){ return; }
+let LB_TAB = 'verified';     // verified | provisional | specialists
+let LB_SORT = 'sharp';       // sharp | roi | win | units | picks
 
+function _sortRows(rows){
+  const copy = [...(rows||[])];
+  const dir = -1; // descending
 
-async function fetchLeaderboard(){
-  try{
+  const keyFn = (r)=>{
+    if(LB_SORT==='sharp') return _num(r.sharp,0);
+    if(LB_SORT==='roi') return _num(r.roi,0);
+    if(LB_SORT==='win') return _num(r.winRate,0);
+    if(LB_SORT==='units') return _num(r.units,0);
+    if(LB_SORT==='picks') return _num(r.picks,0);
+    return _num(r.sharp,0);
+  };
 
-    const rows = await sbSelect(
-      'user_ratings',
-      'select=user_id,sharp_rating_90,win_rate_90,roi_90,units_90,picks_90,pending_90,all_time_singles,top_sport,top_sport_rating,cur_streak,avg_odds_last10,is_provisional&order=sharp_rating_90.desc.nullslast'
-    );
+  copy.sort((a,b)=> dir*(keyFn(a)-keyFn(b)));
+  return copy;
+}
 
-    if(!rows || !rows.length) return [];
-
-    return rows.map(r=>{
-
-      const sharp = Number(r.sharp_rating_90 ?? 0);
-
-      let tier = "Rookie";
-      if(sharp >= 85 && r.picks_90 >= 100) tier = "Elite";
-      else if(sharp >= 70) tier = "Pro";
-      else if(sharp >= 55) tier = "Sharp";
-      else if(sharp >= 40) tier = "Solid";
-
-      return{
-        id: r.user_id,
-
-        sharp,
-        tier,
-
-        winRate: r.win_rate_90 ?? 0,
-        roi: r.roi_90 ?? 0,
-        units: r.units_90 ?? 0,
-
-        picks: r.picks_90 ?? 0,
-        pending: r.pending_90 ?? 0,
-
-        record: r.all_time_singles ?? "0-0-0",
-
-        topSport: r.top_sport ?? "",
-        sportRating: r.top_sport_rating ?? 0,
-
-        streak: r.cur_streak ?? "",
-        avgOdds: r.avg_odds_last10 ?? ""
-      };
-
-    });
-
-  }catch(e){
-    console.warn("Leaderboard load failed", e);
-    return [];
+function _filterRows(rows){
+  if(LB_TAB==='verified') return rows.filter(r=>!r.provisional);
+  if(LB_TAB==='provisional') return rows.filter(r=>r.provisional);
+  if(LB_TAB==='specialists'){
+    // specialists = people with a top sport label (you can refine later)
+    return rows.filter(r=>String(r.topSport||'').trim().length>0);
   }
+  return rows;
+}
+
+function _pill(text){
+  return `<span style="
+    display:inline-flex;align-items:center;gap:6px;
+    padding:4px 10px;border-radius:999px;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.10);
+    font-size:12px;color:rgba(255,255,255,.85);">${text}</span>`;
+}
+
+async function renderLeaderboardPro(){
+  const el = document.getElementById('leaderboardContent');
+  if(!el) return;
+
+  el.innerHTML = `<div class="lb-empty"><div style="font-size:28px;margin-bottom:12px">⏳</div>LOADING LEADERBOARD…</div>`;
+
+  const rowsRaw = await fetchLeaderboard();
+  const rows = _sortRows(_filterRows(rowsRaw));
+
+  const tabBtn = (key,label)=>`
+    <button class="lb-tab ${LB_TAB===key?'on':''}"
+      onclick="LB_TAB='${key}';renderLeaderboardPro()">${label}</button>`;
+
+  const sortBtn = (key,label)=>`
+    <button class="lb-tab ${LB_SORT===key?'on':''}"
+      onclick="LB_SORT='${key}';renderLeaderboardPro()">${label}</button>`;
+
+  const header = `
+    <div class="lb-header">
+      <div>
+        <div style="font-weight:800;font-size:18px;letter-spacing:.4px">Sharp Leaderboard</div>
+        <div style="color:var(--dim);font-size:12px;margin-top:2px">90-day performance • Public ratings follow eligibility rules</div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          ${tabBtn('verified','Verified')}
+          ${tabBtn('provisional','Provisional')}
+          ${tabBtn('specialists','Specialists')}
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+          ${sortBtn('sharp','Sharp Rating')}
+          ${sortBtn('roi','ROI')}
+          ${sortBtn('win','Win %')}
+          ${sortBtn('units','Units')}
+          ${sortBtn('picks','Volume')}
+        </div>
+      </div>
+      <button class="lb-refresh" onclick="renderLeaderboardPro()">↻ REFRESH</button>
+    </div>
+  `;
+
+  const rowHTML = (r, i)=>{
+    const nm = (typeof nameMap !== 'undefined' && nameMap?.[r.id]) ? nameMap[r.id] : `User ${String(r.id).slice(0,6)}`;
+    const tier = r.tier || 'Rookie';
+
+    const prov = r.provisional
+      ? `<div style="margin-top:6px;color:rgba(255,255,255,.65);font-size:12px">
+           ${_pill('Provisional')} <span title="${(r.provisionalReason||'').replace(/"/g,'&quot;')}">ⓘ</span>
+         </div>`
+      : '';
+
+    return `
+      <tr>
+        <td style="white-space:nowrap;">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="lb-avatar" style="width:34px;height:34px;border-radius:14px">${String(nm||'U')[0].toUpperCase()}</div>
+            <div style="min-width:0">
+              <div style="font-weight:800;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${nm}</div>
+              <div style="color:var(--dim);font-size:12px;margin-top:2px">${_pill(tier)} ${r.topSport? _pill(r.topSport):''}</div>
+              ${prov}
+            </div>
+          </div>
+        </td>
+
+        <td style="text-align:right;font-weight:900">${_num(r.sharp,0).toFixed(1)}</td>
+        <td style="text-align:right">${_num(r.winRate,0).toFixed(0)}%</td>
+        <td style="text-align:right">${_num(r.roi,0).toFixed(1)}%</td>
+        <td style="text-align:right">${_num(r.units,0).toFixed(2)}</td>
+        <td style="text-align:right">${_num(r.picks,0)}</td>
+        <td style="text-align:right">${_num(r.pending,0)}</td>
+        <td style="text-align:right;white-space:nowrap">${(r.record||'0-0-0')}</td>
+      </tr>
+    `;
+  };
+
+  const table = `
+    <div class="lb-table-wrap">
+      <table class="lb-table">
+        <thead class="lb-head">
+          <tr>
+            <th>User</th>
+            <th style="text-align:right">SR</th>
+            <th style="text-align:right">Win%</th>
+            <th style="text-align:right">ROI</th>
+            <th style="text-align:right">Units</th>
+            <th style="text-align:right">Picks</th>
+            <th style="text-align:right">Pending</th>
+            <th style="text-align:right">Record</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(rowHTML).join('')}
+        </tbody>
+      </table>
+      ${rows.length ? '' : `<div class="lb-empty" style="margin-top:14px">No users to show for this tab yet.</div>`}
+    </div>
+  `;
+
+  el.innerHTML = header + table;
 }
   }catch(e){ if(supaOnline!==false) console.warn('Leaderboard fetch failed:',e?.message); }
   // Fallback: localStorage
@@ -7536,7 +7624,7 @@ function initPickSyncChannels(){
         updateRecordUI?.();
         renderScores?.();
         renderHistoryView?.();
-        renderLeaderboardView?.();
+        renderLeaderboardPro?.();
       };
     }
 
