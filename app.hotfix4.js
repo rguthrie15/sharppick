@@ -2061,44 +2061,28 @@ const SUPA_HDR = {
 const SUPA_REST = SUPA_URL + "/rest/v1";
 const SUPA_AUTH = SUPA_URL + "/auth/v1";
 const SUPA_AUTH_HDR = { apikey: SUPA_ANON_KEY, "Content-Type": "application/json" };
-
 // --- Initialize Supabase client (realtime + upserts) ---
-var sbClient = null;      // supabase-js client instance
-var supabase = null;      // alias used by app code
+var sbClient = null;     // use var to avoid redeclare issues
+var supabase = null;     // this is YOUR client handle, NOT window.supabase
 
 try {
-  // Prefer an existing client if we already created one
-  if (window.sbClient) {
-    sbClient = window.sbClient;
-    supabase = sbClient;
+  // IMPORTANT: window.supabase is the LIBRARY from the CDN script
+  if (window.supabase && typeof window.supabase.createClient === "function") {
+    sbClient = window.supabase.createClient(SUPA_URL, SUPA_ANON_KEY);
+
+    window.sbClient = sbClient; // expose client for debugging
+    supabase = sbClient;        // your app uses this variable
+
+    console.log("✅ Supabase realtime client ready");
   } else {
-    // In the browser we need the UMD build that exposes `window.supabase.createClient`
-    const supaLib = (window.supabase && typeof window.supabase.createClient === 'function')
-      ? window.supabase
-      : (window.supabaseJs && typeof window.supabaseJs.createClient === 'function')
-        ? window.supabaseJs
-        : null;
-
-    if (supaLib && SUPA_URL && SUPA_ANON_KEY) {
-      sbClient = supaLib.createClient(SUPA_URL, SUPA_ANON_KEY);
-
-      // expose the CLIENT safely for debugging (do NOT overwrite the library)
-      window.sbClient = sbClient;
-
-      // app code expects `supabase` variable to be the client
-      supabase = sbClient;
-
-      console.log('✅ Supabase realtime client ready');
-    } else {
-      console.warn('Supabase client not initialized:', {
-        hasLib: !!supaLib,
-        hasUrl: !!SUPA_URL,
-        hasAnon: !!SUPA_ANON_KEY
-      });
-    }
+    console.warn("⚠️ Supabase library missing createClient()", {
+      hasWindowSupabase: !!window.supabase,
+      hasCreateClient: !!window.supabase?.createClient,
+      supabaseType: typeof window.supabase
+    });
   }
 } catch (e) {
-  console.warn('Supabase client init failed:', e);
+  console.warn("Supabase client init failed:", e);
 }
 
 // ── Supabase connectivity state ────────────────────────────────────
