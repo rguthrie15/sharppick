@@ -6327,64 +6327,27 @@ function renderTrendsDashboard() {
 
   setTimeout(() => {
     try {
-      // Safety: picks may not be ready yet
       const localPicks = Array.isArray(picks) ? picks : [];
-
-      // Compute personal stats from local picks
       const settled = localPicks.filter(p => normalizeResult(p.result) !== 'pending');
 
-      const byType = { spread:{w:0,l:0,p:0}, total:{w:0,l:0,p:0}, prop:{w:0,l:0,p:0}, parlay:{w:0,l:0,p:0} };
-      const byLeague = {};
-      const byDay = {}; // 0=Sun..6=Sat
-      const byResult = { won:0, lost:0, push:0 };
-      let totalWagered = 0, totalProfit = 0;
-
-      settled.forEach(p => {
-        const rr = normalizeResult(p.result);
-        const t = p.type || 'spread';
-
-        if (byType[t]) {
-          if (rr === 'won') byType[t].w++;
-          else if (rr === 'lost') byType[t].l++;
-          else byType[t].p++;
-        }
-
-        const lg = p.league || 'Other';
-        if (!byLeague[lg]) byLeague[lg] = { w:0, l:0 };
-        if (rr === 'won') byLeague[lg].w++;
-        else if (rr === 'lost') byLeague[lg].l++;
-
-        const day = new Date(p.madeAt || Date.now()).getDay();
-        if (!byDay[day]) byDay[day] = { w:0, l:0 };
-        if (rr === 'won') byDay[day].w++;
-        else if (rr === 'lost') byDay[day].l++;
-
-        byResult[rr] = (byResult[rr] || 0) + 1;
-
-        if (p.wager) {
-          totalWagered += p.wager;
-          if (rr === 'won') totalProfit += calcPayout(p.wager, p.odds || -110);
-          else if (rr === 'lost') totalProfit -= p.wager;
-        }
-      });
-
-// ✅ IMPORTANT: actually render something (even if empty)
-if (settled.length === 0) {
-  el.innerHTML = `...`;
-} else {
-  el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
-}
-
-      // TODO: keep the rest of your existing HTML render here
-      // (Whatever you currently do after the calculation section)
-      // Example placeholder:
-      el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
-
+      if (settled.length === 0) {
+        el.innerHTML = `
+          <div class="trends-hdr">📊 Your Trends</div>
+          <div style="margin-top:10px;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px">
+            NO SETTLED PICKS YET
+          </div>
+          <div style="margin-top:14px;color:var(--dim);line-height:1.6">
+            Trends populate after games settle. Once picks resolve, you'll see win rate, ROI, best leagues, and streaks here.
+          </div>
+        `;
+      } else {
+        // Temporary simple output (we can swap back to your full dashboard after it's stable)
+        el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
+      }
     } catch (e) {
       console.error('[trends] render failed', e);
       el.innerHTML = `<div style="color:var(--muted)">Trends unavailable. Please refresh.</div>`;
     } finally {
-      // ALWAYS remove loader overlay
       if (typeof hideViewLoader === 'function') hideViewLoader('trendsContent');
     }
   }, 0);
