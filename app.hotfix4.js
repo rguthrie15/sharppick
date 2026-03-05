@@ -1754,20 +1754,23 @@ function applyUser(){
 // Ensure a public profile row exists (for leaderboard display names)
 async function ensureProfile(){
   try{
-    if(!supabase || !currentUser?.id) return;
 
-    const displayName = (currentUser?.name || currentUser?.email || '').toString().trim();
-    if(!displayName) return;
+    if (typeof supabase === "undefined" || !currentUser?.id) return;
+
+    const displayName = (currentUser?.name || '').toString().trim();
+    if (!displayName) return;
 
     await supabase
       .from('profiles')
-      .upsert({ user_id: currentUser.id, display_name: displayName }, { onConflict: 'user_id' });
+      .upsert(
+        { user_id: currentUser.id, display_name: displayName },
+        { onConflict: 'user_id' }
+      );
 
   }catch(e){
     console.warn('ensureProfile failed:', e?.message || e);
   }
 }
-
 
 // submitName is now replaced by submitGuest/submitLogin/submitSignup
 // Kept as no-op for any legacy references
