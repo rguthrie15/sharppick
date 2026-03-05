@@ -6477,8 +6477,13 @@ function renderTrendsDashboard() {
   // keep your normal trends render code here
 }
 
-} catch(e){ console.error('[trends] render failed', e); el.innerHTML = `<div style="color:var(--muted)">Trends unavailable. Please refresh.</div>`; }
-},0);
+} catch (e) {
+  console.error('[trends] render failed', e);
+  el.innerHTML = `<div style="color:var(--muted)">Trends unavailable. Please refresh.</div>`;
+} finally {
+  if (typeof hideViewLoader === 'function') hideViewLoader('trendsContent');
+}
+}, 0);
 }
 
 function renderMiniSparkline(){
