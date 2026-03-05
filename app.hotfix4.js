@@ -2071,36 +2071,41 @@ try {
   if (window.sbClient) {
     sbClient = window.sbClient;
     supabase = sbClient;
+
   } else {
-    // In the browser we need the UMD build that exposes `window.supabase.createClient`
-    const supaLib = (window.supabase && typeof window.supabase.createClient === 'function')
-      ? window.supabase
-      : (window.supabaseJs && typeof window.supabaseJs.createClient === 'function')
-        ? window.supabaseJs
-        : null;
+    // Some CDN builds expose createClient on window.supabase.default
+    const supaLib =
+      (window.supabase && typeof window.supabase.createClient === "function")
+        ? window.supabase
+        : (window.supabase && window.supabase.default && typeof window.supabase.default.createClient === "function")
+          ? window.supabase.default
+          : (window.supabaseJs && typeof window.supabaseJs.createClient === "function")
+            ? window.supabaseJs
+            : null;
 
     if (supaLib && SUPA_URL && SUPA_ANON_KEY) {
       sbClient = supaLib.createClient(SUPA_URL, SUPA_ANON_KEY);
 
-      // expose the CLIENT safely for debugging (do NOT overwrite the library)
+      // expose the CLIENT safely (do NOT overwrite the library)
       window.sbClient = sbClient;
 
-      // app code expects `supabase` variable to be the client
+      // app code expects `supabase` to be the client:
       supabase = sbClient;
 
-      console.log('✅ Supabase realtime client ready');
+      console.log("✅ Supabase realtime client ready");
     } else {
-      console.warn('Supabase client not initialized:', {
-        hasLib: !!supaLib,
-        hasUrl: !!SUPA_URL,
-        hasAnon: !!SUPA_ANON_KEY
+      console.warn("⚠️ Supabase library missing createClient()", {
+        hasWindowSupabase: !!window.supabase,
+        hasCreateClient: !!window.supabase?.createClient,
+        hasDefaultCreateClient: !!window.supabase?.default?.createClient,
+        hasSupabaseJs: !!window.supabaseJs,
+        supabaseType: typeof window.supabase
       });
     }
   }
 } catch (e) {
-  console.warn('Supabase client init failed:', e);
+  console.warn("Supabase client init failed:", e);
 }
-
 // ── Supabase connectivity state ────────────────────────────────────
 let supaOnline = true;          // flips false after repeated failures
 let supaFailCount = 0;
