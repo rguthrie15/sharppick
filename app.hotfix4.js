@@ -1,3 +1,38 @@
+// ─────────────────────────────────────────────────────────────
+// Supabase bootstrap (MUST run before any supabase.from calls)
+// ─────────────────────────────────────────────────────────────
+(function initSupabaseClient() {
+  const lib =
+    window.supabaseLib ||        // your current global
+    window.supabase ||           // fallback if CDN exposes this
+    window.supabasejs;           // fallback for other UMD builds
+
+  if (!lib || typeof lib.createClient !== "function") {
+    console.error("❌ Supabase library not found. window.supabaseLib/window.supabase missing createClient()");
+    return;
+  }
+
+  // IMPORTANT: set these to your real values (or whatever you already use elsewhere)
+  const SUPABASE_URL = window.SUPABASE_URL || "PASTE_YOUR_SUPABASE_URL_HERE";
+  const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "PASTE_YOUR_SUPABASE_ANON_KEY_HERE";
+
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes("PASTE_") || SUPABASE_ANON_KEY.includes("PASTE_")) {
+    console.error("❌ Missing Supabase URL / ANON KEY. This WILL cause 401s.");
+    return;
+  }
+
+  // Create the actual client and store it where the app expects it
+  window.supabase = lib.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
+
+  console.log("✅ Supabase client ready:", !!window.supabase, "url:", SUPABASE_URL);
+})();
+
 // ═══════════════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════════════
