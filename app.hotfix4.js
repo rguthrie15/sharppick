@@ -3321,30 +3321,38 @@ function fmt1(x){
 
 async function fetchNameMap() {
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('user_id, display_name')
-      .limit(1000);
+    console.log("Fetching profiles...");
 
-    if (error) {
-      console.warn('fetchNameMap error:', error);
+    if (!supabase) {
+      console.warn("Supabase not initialized yet");
       return {};
     }
 
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("user_id, display_name")
+      .limit(1000);
+
+    if (error) {
+      console.warn("fetchNameMap error:", error);
+      return {};
+    }
+
+    console.log("Profiles returned:", data);
+
     const map = {};
     (data || []).forEach((r) => {
-      const uid = String(r.user_id || '');
-      const dn = String(r.display_name || '').trim();
-if (uid && dn) map[uid] = dn;   
+      const uid = String(r.user_id || "");
+      const dn = String(r.display_name || "").trim();
+      if (uid && dn) map[uid] = dn;
     });
 
     return map;
   } catch (e) {
-    console.warn('fetchNameMap exception:', e);
+    console.warn("fetchNameMap exception:", e);
     return {};
   }
 }
-
 async function fetchSharpLeaderboard(tab){
   const limit_n = 100;
 
