@@ -6368,25 +6368,26 @@ function renderTrendsDashboard() {
         }
       });
 
-      // ✅ IMPORTANT: actually render something (even if empty)
-      if (settled.length === 0) {
-        el.innerHTML = `<div style="padding:16px;color:var(--muted)">No settled picks yet — make some picks to see trends.</div>`;
-        return;
-      }
+// ✅ IMPORTANT: actually render something (even if empty)
+if (settled.length === 0) {
+  el.innerHTML = `...`;
+} else {
+  el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
+}
 
       // TODO: keep the rest of your existing HTML render here
       // (Whatever you currently do after the calculation section)
       // Example placeholder:
       el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
 
-    } catch(e){
-  console.error('[trends] render failed', e);
-  el.innerHTML = `<div style="color:var(--muted)">Trends unavailable. Please refresh.</div>`;
-} finally {
-  // ALWAYS remove loader overlay
-  if (typeof hideViewLoader === 'function') hideViewLoader('trendsContent');
-}
-}, 0);
+    } catch (e) {
+      console.error('[trends] render failed', e);
+      el.innerHTML = `<div style="color:var(--muted)">Trends unavailable. Please refresh.</div>`;
+    } finally {
+      // ALWAYS remove loader overlay
+      if (typeof hideViewLoader === 'function') hideViewLoader('trendsContent');
+    }
+  }, 0);
 }
 
   const pct = (w,l) => w+l>0 ? Math.round(w/(w+l)*100) : null;
