@@ -13,8 +13,8 @@
   }
 
   // IMPORTANT: set these to your real values (or whatever you already use elsewhere)
-  const SUPABASE_URL = window.SUPABASE_URL || "PASTE_YOUR_SUPABASE_URL_HERE";
-  const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "PASTE_YOUR_SUPABASE_ANON_KEY_HERE";
+  const SUPABASE_URL = window.SUPABASE_URL || "https://uibdzjvoehhpmjniksyk.supabase.co";
+  const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "sb_publishable_fBiRkR7m1mAN9Jj9jZlffA_gCHjt48a";
 
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes("PASTE_") || SUPABASE_ANON_KEY.includes("PASTE_")) {
     console.error("❌ Missing Supabase URL / ANON KEY. This WILL cause 401s.");
