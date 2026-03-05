@@ -2063,45 +2063,34 @@ const SUPA_AUTH = SUPA_URL + "/auth/v1";
 const SUPA_AUTH_HDR = { apikey: SUPA_ANON_KEY, "Content-Type": "application/json" };
 
 // --- Initialize Supabase client (realtime + upserts) ---
-var sbClient = null;      // supabase-js client instance
-var supabase = null;      // alias used by app code
+// IMPORTANT: the CDN library uses global name `supabase`.
+// Do NOT do `var supabase = null` before this, or you overwrite the library.
+
+var sbClient = null;       // the CLIENT instance we will use
+var supabaseLib = null;    // keep a pointer to the CDN library (optional)
 
 try {
-  // Prefer an existing client if we already created one
-  if (window.sbClient) {
-    sbClient = window.sbClient;
-    supabase = sbClient;
+  // grab the CDN library BEFORE we overwrite window.supabase
+  supabaseLib = window.supabase;
 
+  if (supabaseLib && typeof supabaseLib.createClient === "function" && SUPA_URL && SUPA_ANON_KEY) {
+    sbClient = supabaseLib.createClient(SUPA_URL, SUPA_ANON_KEY);
+
+    // expose client for debugging
+    window.sbClient = sbClient;
+    window.supabaseLib = supabaseLib;
+
+    // your app code expects `supabase` to be the CLIENT (not the library)
+    window.supabase = sbClient;
+
+    console.log("✅ Supabase client ready");
   } else {
-    // Some CDN builds expose createClient on window.supabase.default
-    const supaLib =
-      (window.supabase && typeof window.supabase.createClient === "function")
-        ? window.supabase
-        : (window.supabase && window.supabase.default && typeof window.supabase.default.createClient === "function")
-          ? window.supabase.default
-          : (window.supabaseJs && typeof window.supabaseJs.createClient === "function")
-            ? window.supabaseJs
-            : null;
-
-    if (supaLib && SUPA_URL && SUPA_ANON_KEY) {
-      sbClient = supaLib.createClient(SUPA_URL, SUPA_ANON_KEY);
-
-      // expose the CLIENT safely (do NOT overwrite the library)
-      window.sbClient = sbClient;
-
-      // app code expects `supabase` to be the client:
-      supabase = sbClient;
-
-      console.log("✅ Supabase realtime client ready");
-    } else {
-      console.warn("⚠️ Supabase library missing createClient()", {
-        hasWindowSupabase: !!window.supabase,
-        hasCreateClient: !!window.supabase?.createClient,
-        hasDefaultCreateClient: !!window.supabase?.default?.createClient,
-        hasSupabaseJs: !!window.supabaseJs,
-        supabaseType: typeof window.supabase
-      });
-    }
+    console.warn("⚠️ Supabase library missing createClient()", {
+      supabaseType: typeof window.supabase,
+      hasCreateClient: !!(window.supabase && window.supabase.createClient),
+      urlOk: !!SUPA_URL,
+      keyOk: !!SUPA_ANON_KEY
+    });
   }
 } catch (e) {
   console.warn("Supabase client init failed:", e);
