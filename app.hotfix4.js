@@ -1751,27 +1751,25 @@ function applyUser(){
   }, 4000);
 }
 
-// Ensure a public profile row exists (for leaderboard display names)
-async function ensureProfile(){
-  try{
+async function ensureProfile() {
+  try {
+    const c = window.sbClient;
+    if (!c || !currentUser?.id) return;
 
-    if (typeof supabase === "undefined" || !currentUser?.id) return;
-
-    const displayName = (currentUser?.name || '').toString().trim();
+    // DO NOT FALL BACK TO EMAIL
+    const displayName = String(currentUser?.name || "").trim();
     if (!displayName) return;
 
-    await supabase
-      .from('profiles')
+    await c
+      .from("profiles")
       .upsert(
         { user_id: currentUser.id, display_name: displayName },
-        { onConflict: 'user_id' }
+        { onConflict: "user_id" }
       );
-
-  }catch(e){
-    console.warn('ensureProfile failed:', e?.message || e);
+  } catch (e) {
+    console.warn("ensureProfile failed:", e?.message || e);
   }
 }
-
 // submitName is now replaced by submitGuest/submitLogin/submitSignup
 // Kept as no-op for any legacy references
 function submitName(){ submitGuest(); }
@@ -2050,13 +2048,46 @@ function computeRatingsDaily(force=false){
 
 
 // ─── SUPABASE REST API (plain fetch — no library, no workers) ──────
-const SUPA_URL = 'https://uibdzjvoehhpmjniksyk.supabase.co';
-const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVpYmR6anZvZWhocG1qbmlrc3lrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIzMzgwMDUsImV4cCI6MjA4NzkxNDAwNX0.6-d8KmqsKBRfP5IZEJnm-Mhd3eAwFVFIRk2NM3xAAS4';
-const SUPA_HDR = {'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Content-Type':'application/json'};
-const SUPA_REST = SUPA_URL+'/rest/v1';
-const SUPA_AUTH = SUPA_URL + '/auth/v1';
-const SUPA_AUTH_HDR = { 'apikey': SUPA_KEY, 'Content-Type': 'application/json' };
+// --- SUPABASE REST API (plain fetch) ---
+const SUPA_URL = "https://uibdzjvoehhpmjniksyk.supabase.co";
+const SUPA_ANON_KEY = sb_publishable_fBiRkR7m1mAN9Jj9jZlffA_gCHjt48a; // publishable key ONLY
 
+const SUPA_HDR = {
+  apikey: SUPA_ANON_KEY,
+  Authorization: "Bearer " + SUPA_ANON_KEY,
+  "Content-Type": "application/json"
+};
+
+const SUPA_REST = SUPA_URL + "/rest/v1";
+const SUPA_AUTH = SUPA_URL + "/auth/v1";
+const SUPA_AUTH_HDR = { apikey: SUPA_ANON_KEY, "Content-Type": "application/json" };
+
+// --- Initialize Supabase client (realtime + upserts) ---
+let sbClient = null;
+let supabase = null;
+
+try {
+  // window.supabase is the CDN LIBRARY
+  if (window.supabase?.createClient && SUPA_URL && SUPA_ANON_KEY) {
+    sbClient = window.supabase.createClient(SUPA_URL, SUPA_ANON_KEY);
+
+    // expose the CLIENT safely for debugging
+    window.sbClient = sbClient;
+
+    // your app code expects `supabase` variable to be the client:
+    supabase = sbClient;
+
+    console.log("✅ Supabase realtime client ready");
+  } else {
+    console.warn("Supabase client not initialized:", {
+      hasLib: !!window.supabase?.createClient,
+      hasUrl: !!SUPA_URL,
+      hasAnon: !!SUPA_ANON_KEY
+    });
+  }
+} catch (e) {
+  console.warn("Supabase client init failed:", e);
+}
 // ── Supabase connectivity state ────────────────────────────────────
 let supaOnline = true;          // flips false after repeated failures
 let supaFailCount = 0;
