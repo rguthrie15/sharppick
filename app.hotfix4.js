@@ -2063,8 +2063,8 @@ const SUPA_AUTH = SUPA_URL + "/auth/v1";
 const SUPA_AUTH_HDR = { apikey: SUPA_ANON_KEY, "Content-Type": "application/json" };
 
 // --- Initialize Supabase client (realtime + upserts) ---
-var sbClient = null;   // keep as var so it’s function/global-safe in this single-file setup
-var supabase = null;
+let sbClient = null;
+let supabase = null;
 
 try {
   // window.supabase is the CDN LIBRARY (do NOT overwrite it)
@@ -2248,19 +2248,19 @@ function _tierIcon(tier){
 }
 
 function _getDisplayNameForUserId(uid){
-  // Prefer current user name/email
+  // Prefer current user display name ONLY (no email fallback)
   try{
     if(currentUser?.id && uid === currentUser.id){
       const nm = (currentUser?.name || '').toString().trim();
       if(nm) return nm;
-      const em = (currentUser?.email || '').toString().trim();
-      if(em) return em.split('@')[0];
     }
   }catch{}
+
   // If we have a global nameMap, use it
   try{
     if(typeof nameMap !== 'undefined' && nameMap && nameMap[uid]) return nameMap[uid];
   }catch{}
+
   return `User ${String(uid||'').slice(0,6)}`;
 }
 
