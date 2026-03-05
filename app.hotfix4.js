@@ -6341,7 +6341,6 @@ function renderTrendsDashboard() {
           </div>
         `;
       } else {
-        // Temporary simple output (we can swap back to your full dashboard after it's stable)
         el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
       }
     } catch (e) {
