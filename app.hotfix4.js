@@ -6319,47 +6319,75 @@ function patchCheckPickResultsForCelebrations(){
 // ═══════════════════════════════════════════════════════
 // TRENDS DASHBOARD
 // ═══════════════════════════════════════════════════════
-function renderTrendsDashboard(){
+function renderTrendsDashboard() {
   const el = document.getElementById('trendsContent');
-  if(!el) return;
-  showViewLoader('trendsContent','LOADING TRENDS…');
-  setTimeout(()=>{try{
- // allow loader to paint
+  if (!el) return;
 
-  // Compute personal stats from local picks
-  const settled = picks.filter(p=>normalizeResult(p.result)!=='pending');
-  const byType = {spread:{w:0,l:0,p:0}, total:{w:0,l:0,p:0}, prop:{w:0,l:0,p:0}, parlay:{w:0,l:0,p:0}};
-  const byLeague = {};
-  const byDay = {}; // 0=Sun..6=Sat
-  const byResult = {won:0,lost:0,push:0};
-  let totalWagered=0, totalProfit=0;
+  showViewLoader('trendsContent', 'LOADING TRENDS…');
 
-  settled.forEach(p=>{
-    const rr = normalizeResult(p.result);
-    const t = p.type||'spread';
-    if(byType[t]) {
-      if(rr==='won') byType[t].w++;
-      else if(rr==='lost') byType[t].l++;
-      else byType[t].p++;
+  setTimeout(() => {
+    try {
+      // Safety: picks may not be ready yet
+      const localPicks = Array.isArray(picks) ? picks : [];
+
+      // Compute personal stats from local picks
+      const settled = localPicks.filter(p => normalizeResult(p.result) !== 'pending');
+
+      const byType = { spread:{w:0,l:0,p:0}, total:{w:0,l:0,p:0}, prop:{w:0,l:0,p:0}, parlay:{w:0,l:0,p:0} };
+      const byLeague = {};
+      const byDay = {}; // 0=Sun..6=Sat
+      const byResult = { won:0, lost:0, push:0 };
+      let totalWagered = 0, totalProfit = 0;
+
+      settled.forEach(p => {
+        const rr = normalizeResult(p.result);
+        const t = p.type || 'spread';
+
+        if (byType[t]) {
+          if (rr === 'won') byType[t].w++;
+          else if (rr === 'lost') byType[t].l++;
+          else byType[t].p++;
+        }
+
+        const lg = p.league || 'Other';
+        if (!byLeague[lg]) byLeague[lg] = { w:0, l:0 };
+        if (rr === 'won') byLeague[lg].w++;
+        else if (rr === 'lost') byLeague[lg].l++;
+
+        const day = new Date(p.madeAt || Date.now()).getDay();
+        if (!byDay[day]) byDay[day] = { w:0, l:0 };
+        if (rr === 'won') byDay[day].w++;
+        else if (rr === 'lost') byDay[day].l++;
+
+        byResult[rr] = (byResult[rr] || 0) + 1;
+
+        if (p.wager) {
+          totalWagered += p.wager;
+          if (rr === 'won') totalProfit += calcPayout(p.wager, p.odds || -110);
+          else if (rr === 'lost') totalProfit -= p.wager;
+        }
+      });
+
+      // ✅ IMPORTANT: actually render something (even if empty)
+      if (settled.length === 0) {
+        el.innerHTML = `<div style="padding:16px;color:var(--muted)">No settled picks yet — make some picks to see trends.</div>`;
+        return;
+      }
+
+      // TODO: keep the rest of your existing HTML render here
+      // (Whatever you currently do after the calculation section)
+      // Example placeholder:
+      el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
+
+    } catch (e) {
+      console.error('❌ renderTrendsDashboard failed:', e);
+      el.innerHTML = `<div style="padding:16px;color:#ff6b6b">Trends failed to load. Check console.</div>`;
+    } finally {
+      // ✅ This is the key fix: remove the loader no matter what
+      hideViewLoader?.('trendsContent');
     }
-    const lg = p.league||'Other';
-    if(!byLeague[lg]) byLeague[lg]={w:0,l:0};
-    if(rr==='won') byLeague[lg].w++;
-    else if(rr==='lost') byLeague[lg].l++;
-
-    const day = new Date(p.madeAt).getDay();
-    if(!byDay[day]) byDay[day]={w:0,l:0};
-    if(rr==='won') byDay[day].w++;
-    else if(rr==='lost') byDay[day].l++;
-
-    byResult[rr]=(byResult[rr]||0)+1;
-
-    if(p.wager){
-      totalWagered += p.wager;
-      if(rr==='won') totalProfit += calcPayout(p.wager, p.odds||-110);
-      else if(rr==='lost') totalProfit -= p.wager;
-    }
-  });
+  }, 0);
+}
 
   const pct = (w,l) => w+l>0 ? Math.round(w/(w+l)*100) : null;
   const pctStr = (w,l) => { const p=pct(w,l); return p!==null?p+'%':'—'; };
