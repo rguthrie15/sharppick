@@ -2262,17 +2262,16 @@ async function fetchLeaderboard(){
   };
   const orderCol = sortMap[LB_SORT] || 'sharp_rating_90';
 
-  try{
-    const nameMap = await fetchNameMap();
-    const rows = await sbSelect('user_ratings', `select=*
-&order=${orderCol}.desc
-&limit=250`.replace(/
-/g,''));
-
-    return (rows||[]).map(r=>{
-      const uid = r.user_id;
-      const name = nameMap?.[uid] || (`user-${String(uid||'').slice(0,6)}`);
-
+try{
+  const nameMap = await fetchNameMap();
+  const rows = await sbSelect(
+  'user_ratings',
+  `select=*&order=${orderCol}.desc&limit=250`.replace(/\n/g, '')
+);
+ 
+  return (rows||[]).map(r=>{
+      const uid = String(r.user_id || '');
+const name = nameMap?.[uid] || `user-${uid.slice(0,6)}`;
       const sharp = Number(r.sharp_rating_90 ?? 0);
       const roi = Number(r.roi_90 ?? 0);
       const winRate = Number(r.win_rate_90 ?? 0);
