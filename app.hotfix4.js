@@ -40,7 +40,7 @@ const SPORT_STAT_CONFIGS = {
     cols: ['min','pts','reb','ast','stl','blk','to','fg'],
     labels: {min:'MIN',pts:'PTS',reb:'REB',ast:'AST',stl:'STL',blk:'BLK',to:'TO',fg:'FG'},
     propStats: ['pts','reb','ast'],
-    // ESPN stat key → {label, fallbackLine} — real lines fetched per-player from season avgs
+    // ESPN stat key → {label, fallbackLine} — real lines ed per-player from season avgs
     propDefs: {pts:{label:'PTS',fb:14.5}, reb:{label:'REB',fb:5.5}, ast:{label:'AST',fb:3.5}},
   },
   football: {
@@ -2270,8 +2270,9 @@ try{
 );
  
   return (rows||[]).map(r=>{
-      const uid = String(r.user_id || '');
-const name = nameMap?.[uid] || `user-${uid.slice(0,6)}`;
+const uid = String(r.user_id || '');
+const dn = String(nameMap?.[uid] || '').trim();
+const name = dn || (uid ? `user-${uid.slice(0,6)}` : 'user');
       const sharp = Number(r.sharp_rating_90 ?? 0);
       const roi = Number(r.roi_90 ?? 0);
       const winRate = Number(r.win_rate_90 ?? 0);
@@ -3318,20 +3319,28 @@ function fmt1(x){
   return (Math.round(Number(x)*10)/10).toFixed(1);
 }
 
-async function fetchNameMap(){
-  // Map user_id -> display name for UI.
-  // Prefer user_profiles (created on signup). Fall back to short ids.
-  try{
-    const rows = await sbSelect('user_profiles','select=user_id,display_name,name&limit=1000');
-    const m = {};
-    (rows||[]).forEach(r=>{
-      const id = r?.user_id || r?.id;
-      const nm = (r?.display_name || r?.name || '').toString().trim();
-      if(id && nm) m[id]=nm;
+async function fetchNameMap() {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('user_id, display_name')
+      .limit(1000);
+
+    if (error) {
+      console.warn('fetchNameMap error:', error);
+      return {};
+    }
+
+    const map = {};
+    (data || []).forEach((r) => {
+      const uid = String(r.user_id || '');
+      const dn = String(r.display_name || '').trim();
+if (uid && dn) map[uid] = dn;   
     });
-    return m;
-  }catch(e){
-    console.warn('fetchNameMap failed (user_profiles).', e?.message||e);
+
+    return map;
+  } catch (e) {
+    console.warn('fetchNameMap exception:', e);
     return {};
   }
 }
