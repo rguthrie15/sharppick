@@ -3323,33 +3323,24 @@ async function fetchNameMap() {
   try {
     console.log("Fetching profiles...");
 
-    if (!supabase) {
-      console.warn("Supabase not initialized yet");
-      return {};
-    }
-
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("user_id, display_name")
-      .limit(1000);
-
-    if (error) {
-      console.warn("fetchNameMap error:", error);
-      return {};
-    }
+    // Use the same helper the rest of the app uses
+    const data = await sbSelect(
+      'profiles',
+      'select=user_id,display_name&limit=5000'.replace(/\n/g, '')
+    );
 
     console.log("Profiles returned:", data);
 
     const map = {};
     (data || []).forEach((r) => {
-      const uid = String(r.user_id || "");
-      const dn = String(r.display_name || "").trim();
+      const uid = String(r.user_id || '');
+      const dn = String(r.display_name || '').trim();
       if (uid && dn) map[uid] = dn;
     });
 
     return map;
   } catch (e) {
-    console.warn("fetchNameMap exception:", e);
+    console.warn('fetchNameMap exception:', e);
     return {};
   }
 }
