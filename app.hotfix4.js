@@ -6379,14 +6379,14 @@ function renderTrendsDashboard() {
       // Example placeholder:
       el.innerHTML = `<div style="padding:16px">Trends loaded. Settled picks: ${settled.length}</div>`;
 
-    } catch (e) {
-      console.error('❌ renderTrendsDashboard failed:', e);
-      el.innerHTML = `<div style="padding:16px;color:#ff6b6b">Trends failed to load. Check console.</div>`;
-    } finally {
-      // ✅ This is the key fix: remove the loader no matter what
-      hideViewLoader?.('trendsContent');
-    }
-  }, 0);
+    } catch(e){
+  console.error('[trends] render failed', e);
+  el.innerHTML = `<div style="color:var(--muted)">Trends unavailable. Please refresh.</div>`;
+} finally {
+  // ALWAYS remove loader overlay
+  if (typeof hideViewLoader === 'function') hideViewLoader('trendsContent');
+}
+}, 0);
 }
 
   const pct = (w,l) => w+l>0 ? Math.round(w/(w+l)*100) : null;
@@ -6499,18 +6499,19 @@ function renderTrendsDashboard() {
 
     </div>`;
 
-    if(settled.length===0){
-      el.innerHTML = `
-        <div class="trends-hdr">📊 Your Trends</div>
-        <div style="margin-top:10px;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px">
-          NO SETTLED PICKS YET
-        </div>
-        <div style="margin-top:14px;color:var(--dim);line-height:1.6">
-          Trends populate after games settle. Once picks resolve, you'll see win rate, ROI, best leagues, and streaks here.
-        </div>
-      `;
-      return;
-    }
+  if (settled.length === 0) {
+  el.innerHTML = `
+    <div class="trends-hdr">📊 Your Trends</div>
+    <div style="margin-top:10px;color:var(--muted);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px">
+      NO SETTLED PICKS YET
+    </div>
+    <div style="margin-top:14px;color:var(--dim);line-height:1.6">
+      Trends populate after games settle. Once picks resolve, you'll see win rate, ROI, best leagues, and streaks here.
+    </div>
+  `;
+} else {
+  // keep your normal trends render code here
+}
 
 } catch(e){ console.error('[trends] render failed', e); el.innerHTML = `<div style="color:var(--muted)">Trends unavailable. Please refresh.</div>`; }
 },0);
