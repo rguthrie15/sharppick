@@ -2050,7 +2050,7 @@ function computeRatingsDaily(force=false){
 // ─── SUPABASE REST API (plain fetch — no library, no workers) ──────
 // --- SUPABASE REST API (plain fetch) ---
 const SUPA_URL = "https://uibdzjvoehhpmjniksyk.supabase.co";
-const SUPA_ANON_KEY = sb_publishable_fBiRkR7m1mAN9Jj9jZlffA_gCHjt48a; // publishable key ONLY
+const SUPA_ANON_KEY = "sb_publishable_fBiRkR7m1mAN9Jj9jZlffA_gCHjt48a"; // publishable key ONLY
 
 const SUPA_HDR = {
   apikey: SUPA_ANON_KEY,
@@ -2063,18 +2063,18 @@ const SUPA_AUTH = SUPA_URL + "/auth/v1";
 const SUPA_AUTH_HDR = { apikey: SUPA_ANON_KEY, "Content-Type": "application/json" };
 
 // --- Initialize Supabase client (realtime + upserts) ---
-let sbClient = null;
-let supabase = null;
+var sbClient = null;   // keep as var so it’s function/global-safe in this single-file setup
+var supabase = null;
 
 try {
-  // window.supabase is the CDN LIBRARY
+  // window.supabase is the CDN LIBRARY (do NOT overwrite it)
   if (window.supabase?.createClient && SUPA_URL && SUPA_ANON_KEY) {
     sbClient = window.supabase.createClient(SUPA_URL, SUPA_ANON_KEY);
 
-    // expose the CLIENT safely for debugging
+    // expose the client without overwriting the library
     window.sbClient = sbClient;
 
-    // your app code expects `supabase` variable to be the client:
+    // your app code uses `supabase` as the client:
     supabase = sbClient;
 
     console.log("✅ Supabase realtime client ready");
