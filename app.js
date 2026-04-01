@@ -3466,9 +3466,14 @@ function checkPickResults(){
 
     if(pick.type==='moneyline'){
       // Pure moneyline — team just needs to win outright
-      const isHome = pick.side === g.home.name ||
-                     (g.home.name && pick.side && g.home.name.toLowerCase().includes(pick.side.toLowerCase())) ||
-                     (pick.side && g.home.name && pick.side.toLowerCase().includes(g.home.name.toLowerCase()));
+      let isHome;
+      if (pick.isHomeTeam !== undefined && pick.isHomeTeam !== null) {
+        isHome = !!pick.isHomeTeam;
+      } else {
+        // Word-boundary match avoids false positives like "hornets".includes("nets")
+        const _wbMatch = (hay, ndl) => new RegExp('\\b' + ndl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(hay);
+        isHome = pick.side === g.home.name || _wbMatch(g.home.name, pick.side||'') || _wbMatch(pick.side||'', g.home.name||'');
+      }
       const pickedScore = isHome ? hs : as2;
       const oppScore    = isHome ? as2 : hs;
       if(pickedScore > oppScore)       pick.result = 'won';
@@ -3480,9 +3485,14 @@ function checkPickResults(){
       // Guard: if |line| > 50 it is a stray MONEYLINE number — settle as outright win.
       const parts = (pick.description||'').trim().split(/\s+/);
       const rawLine = pick.line != null ? pick.line : parseFloat(parts[parts.length - 1]);
-      const isHome = pick.side === g.home.name ||
-                     (g.home.name && pick.side && g.home.name.toLowerCase().includes(pick.side.toLowerCase())) ||
-                     (pick.side && g.home.name && pick.side.toLowerCase().includes(g.home.name.toLowerCase()));
+      let isHome;
+      if (pick.isHomeTeam !== undefined && pick.isHomeTeam !== null) {
+        isHome = !!pick.isHomeTeam;
+      } else {
+        // Word-boundary match avoids false positives like "hornets".includes("nets")
+        const _wbMatch = (hay, ndl) => new RegExp('\\b' + ndl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(hay);
+        isHome = pick.side === g.home.name || _wbMatch(g.home.name, pick.side||'') || _wbMatch(pick.side||'', g.home.name||'');
+      }
       const pickedScore = isHome ? hs : as2;
       const oppScore    = isHome ? as2 : hs;
 
@@ -3966,9 +3976,9 @@ function _settlePickAgainstScore(pick, hs, as2, homeName, awayName) {
     if (pick.isHomeTeam !== undefined && pick.isHomeTeam !== null) {
       isHome = !!pick.isHomeTeam;
     } else {
-      const sideLC = (pick.side || '').toLowerCase();
-      const homeLC = (homeName || '').toLowerCase();
-      isHome = homeLC.includes(sideLC) || sideLC.includes(homeLC);
+      // Word-boundary match avoids false positives like "hornets".includes("nets")
+      const _wbMatch = (hay, ndl) => ndl && new RegExp('\\b' + ndl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(hay);
+      isHome = (pick.side && homeName && pick.side === homeName) || _wbMatch(homeName||'', pick.side||'') || _wbMatch(pick.side||'', homeName||'');
     }
     const pickedScore = isHome ? hs  : as2;
     const oppScore    = isHome ? as2 : hs;
@@ -3999,6 +4009,23 @@ function _settlePickAgainstScore(pick, hs, as2, homeName, awayName) {
     else                                  pick.result = adj > oppScore ? 'won' : 'lost';
     return true;
   }
+
+  if (pick.type === 'moneyline') {
+    let isHome;
+    if (pick.isHomeTeam !== undefined && pick.isHomeTeam !== null) {
+      isHome = !!pick.isHomeTeam;
+    } else {
+      const _wbMatch = (hay, ndl) => ndl && new RegExp('\\b' + ndl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(hay);
+      isHome = (pick.side && homeName && pick.side === homeName) || _wbMatch(homeName||'', pick.side||'') || _wbMatch(pick.side||'', homeName||'');
+    }
+    const pickedScore = isHome ? hs : as2;
+    const oppScore    = isHome ? as2 : hs;
+    if (pickedScore > oppScore)      pick.result = 'won';
+    else if (pickedScore < oppScore) pick.result = 'lost';
+    else                             pick.result = 'push';
+    return true;
+  }
+
   return false;
 }
 
@@ -4110,11 +4137,10 @@ async function _fetchAndResettleHistoricalPicksInner() {
         const oddsToken = (oddsP[0] || '').toUpperCase();
         const oddsNum   = parseFloat(oddsP[oddsP.length - 1]);
         if (!isNaN(oddsNum)) {
-          const sideLC   = (pick.side || '').toLowerCase();
-          const homeLC   = sc.homeName.toLowerCase();
-          const awayLC   = sc.awayName.toLowerCase();
-          // isHome based on name match
-          const isHome = homeLC.includes(sideLC) || sideLC.includes(homeLC);
+          // Word-boundary match avoids false positives like "hornets".includes("nets")
+          const _wbMatch = (hay, ndl) => ndl && new RegExp('\\b' + ndl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(hay);
+          const sideStr  = pick.side || '';
+          const isHome   = sideStr === sc.homeName || _wbMatch(sc.homeName, sideStr) || _wbMatch(sideStr, sc.homeName);
           pick.isHomeTeam = isHome;
           // Determine if ESPN odds token refers to home or away team
           const tokenIsHome = (oddsToken === sc.homeAbbr) ||
@@ -8116,18 +8142,17 @@ function calcPayout(wager, americanOdds){
 }
 
 // Normalize result strings across app (db uses win/loss; UI may use won/lost)
+// NOTE: a second definition of this function exists later in the file; this one
+// is intentionally kept in sync with it — both must match.
 function normalizeResult(r){
-  // Normalize legacy / inconsistent result values across builds.
-  // Treat missing/empty as pending so older picks still count toward pending.
-  if(r===undefined || r===null || r==='') return 'pending';
-  const x = String(r).toLowerCase();
-  if(x === 'win') return 'won';
-  if(x === 'won') return 'won';
-  if(x === 'loss') return 'lost';
-  if(x === 'lost') return 'lost';
-  if(x === 'push' || x === 'pushed') return 'push';
-  if(x === 'pending' || x === 'open' || x === 'unsettled') return 'pending';
-  return x;
+  const x = String(r||'').toLowerCase().trim();
+  if(!x) return 'pending';
+  if(['pending','open','unsettled'].includes(x)) return 'pending';
+  if(['won','win','w'].includes(x)) return 'won';
+  if(['lost','loss','l'].includes(x)) return 'lost';
+  if(['push','pushed','p'].includes(x)) return 'push';
+  if(['void','canceled','cancelled','cancel'].includes(x)) return 'push';
+  return 'pending';
 }
 
 // Total P&L across all settled picks

@@ -5,11 +5,6 @@
 
 exports.handler = async function(event, context) {
 
-  // Only allow POST
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
-  }
-
   // CORS headers — allows your frontend to call this function
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -17,9 +12,14 @@ exports.handler = async function(event, context) {
     'Content-Type': 'application/json'
   };
 
-  // Handle preflight
+  // Handle preflight before the POST-only guard
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
+  }
+
+  // Only allow POST
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
   try {

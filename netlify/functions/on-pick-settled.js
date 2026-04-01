@@ -67,15 +67,15 @@ function computeRatingRow(userId, picks) {
   const parlays  = picks.filter(p => p.type === 'parlay');
 
   const s90 = singles.filter(p => {
-    const ts = +(p.settled_at || p.made_at || 0);
+    const ts = +(p.settled_at || p.made_at) || Date.now();
     return ts >= cutoff90 && normalizeResult(p.result) !== 'pending';
   });
   const s90pend = singles.filter(p => {
-    const ts = +(p.settled_at || p.made_at || 0);
+    const ts = +(p.settled_at || p.made_at) || Date.now();
     return ts >= cutoff90 && normalizeResult(p.result) === 'pending';
   });
   const p90 = parlays.filter(p => {
-    const ts = +(p.settled_at || p.made_at || 0);
+    const ts = +(p.settled_at || p.made_at) || Date.now();
     return ts >= cutoff90;
   });
 
@@ -100,7 +100,7 @@ function computeRatingRow(userId, picks) {
   // Consistency: penalize weeks with ROI < -5%
   const byWeekC = {};
   s90.forEach(p => {
-    const ts = +(p.settled_at || p.made_at || 0);
+    const ts = +(p.settled_at || p.made_at) || Date.now();
     const d = new Date(ts); d.setHours(0,0,0,0);
     d.setDate(d.getDate() + 3 - ((d.getDay()+6)%7));
     const week1 = new Date(d.getFullYear(),0,4);

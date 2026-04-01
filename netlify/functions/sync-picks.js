@@ -224,13 +224,41 @@ function computeRatingsFromRows(rows) {
   const topSport = Object.entries(byLeague).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 
   const picks90 = aSingles90.decided + aParlays90.decided;
-  const isProv = picks90 < 18;
+  const isProv = picks90 < 20;
   const provReason = isProv ? `${picks90} to unlock Verified leaderboard` : null;
 
-  const rating = Math.max(
-    0,
-    Math.min(100, aSingles90.winRate * 0.7 + Math.max(-100, Math.min(100, aSingles90.roi)) * 0.3)
-  );
+  // ── Sharp Rating Formula (0–1000 scale, matches recalculate-ratings.js) ──
+  const winRateScore = Math.max(0, Math.min(1000, (aSingles90.winRate - 52.4) * 20 + 500));
+  const roiScore     = Math.max(0, Math.min(1000, aSingles90.roi * 25 + 500));
+  // Consistency: penalise weeks with week-ROI < -5%
+  const _byWeek = {};
+  singles90.forEach(p => {
+    const r = pickResult(p);
+    if (r === 'pending' || r === 'canceled') return;
+    const ts = +(p.settled_at || p.made_at) || Date.now();
+    const d = new Date(ts);
+    d.setHours(0,0,0,0);
+    d.setDate(d.getDate() + 3 - ((d.getDay()+6)%7));
+    const week1 = new Date(d.getFullYear(),0,4);
+    const wk = d.getFullYear() + '-' + String(1+Math.round(((d-week1)/86400000-3+((week1.getDay()+6)%7))/7)).padStart(2,'0');
+    if (!_byWeek[wk]) _byWeek[wk] = { risk: 0, pnl: 0 };
+    const rk = toNum(p?.risk ?? p?.wager ?? 50, 50);
+    const od = toNum(p?.odds ?? -110, -110);
+    _byWeek[wk].risk += rk;
+    if (r === 'won')       _byWeek[wk].pnl += profitFromOdds(rk, od);
+    else if (r === 'lost') _byWeek[wk].pnl -= rk;
+  });
+  const _weeks = Object.keys(_byWeek);
+  let _badWeeks = 0;
+  _weeks.forEach(w => {
+    const risk = _byWeek[w].risk || 0;
+    if (risk > 0 && (_byWeek[w].pnl || 0) / risk < -0.05) _badWeeks++;
+  });
+  const _rawConsistency = _weeks.length > 0 ? Math.max(0, 100 - (_badWeeks / _weeks.length) * 120) : 50;
+  const consistencyScore = Math.max(0, Math.min(1000, _rawConsistency * 10));
+  const _decidedCount = singles90.filter(p => { const r = pickResult(p); return r !== 'pending' && r !== 'canceled'; }).length;
+  const volumeMult = Math.max(0.7, Math.min(1.0, 0.7 + (Math.min(_decidedCount, 50) / 50) * 0.3));
+  const rating = Math.round(Math.max(0, Math.min(1000, (winRateScore * 0.5 + roiScore * 0.3 + consistencyScore * 0.2) * volumeMult)) * 10) / 10;
 
   const settledSinglesDesc = singlesAll
     .filter((p) => {

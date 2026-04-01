@@ -122,7 +122,7 @@ function computeRatingRow(userId, picks) {
   // Consistency Score: penalize weeks with ROI < -5%
   const byWeek = {};
   s90.forEach(p => {
-    const ts = +(p.settled_at || p.made_at || 0);
+    const ts = +(p.settled_at || p.made_at) || Date.now();
     const d = new Date(ts);
     d.setHours(0,0,0,0);
     d.setDate(d.getDate() + 3 - ((d.getDay()+6)%7));
