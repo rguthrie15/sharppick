@@ -1767,6 +1767,8 @@ function makePropPick(gameId, playerId, playerName, statKey, statLabel, line, si
     playerName, statLabel,
     homeTeam:g?.home.name||'',awayTeam:g?.away.name||'',
     league:g?.leagueLabel||'',madeAt:Date.now(),
+    wager: _pendingWager || DEFAULT_WAGER,
+    odds: -110,
     // Store the actual game id separately for result checking
     actualGameId: gameId,
   });
@@ -3330,13 +3332,17 @@ function pickFromBtn(btn, evt){
   // Mark this button as selected
   btn.classList.add('selecting');
   const wager = DEFAULT_WAGER;
-  const profit = calcPayout(wager, -110);
+  // Derive actual odds: if |line| >= 50 it's a moneyline value (e.g. +227), use it directly.
+  // Spread/total lines are always small (< 50), so fall back to -110 for those.
+  const _rawLineNum = parseFloat(btn.dataset.line);
+  const _pickedOdds = !isNaN(_rawLineNum) && Math.abs(_rawLineNum) >= 50 ? _rawLineNum : -110;
+  const profit = calcPayout(wager, _pickedOdds);
   const bankData = computeBankroll();
   const bal = typeof bankData === 'object' ? (bankData.balance||STARTING_BANKROLL) : (bankData||STARTING_BANKROLL);
   const maxBet = Math.floor(bal);
   const presets = [25, 50, 100, 250];
 
-  pendingPickSel[selKey] = {btn, gid, type, side:btn.dataset.side, desc:btn.dataset.desc, game:btn.dataset.game, line:btn.dataset.line, isHomeTeam:btn.dataset.ishome==='1', wager};
+  pendingPickSel[selKey] = {btn, gid, type, side:btn.dataset.side, desc:btn.dataset.desc, game:btn.dataset.game, line:btn.dataset.line, isHomeTeam:btn.dataset.ishome==='1', odds:_pickedOdds, wager};
 
   // Build pre-pick panel with wager + parlay + place button
   const row = btn.closest('.pick-row');
@@ -3370,7 +3376,7 @@ function updatePendingWager(selKey, amount){
   const bal = typeof bankData === 'object' ? (bankData.balance||STARTING_BANKROLL) : (bankData||STARTING_BANKROLL);
   const maxBet = Math.floor(bal);
   sel.wager = Math.max(1, Math.min(Math.round(amount), maxBet));
-  const profit = calcPayout(sel.wager, -110);
+  const profit = calcPayout(sel.wager, sel.odds || -110);
   const panel = document.querySelector('.prepick-panel[data-sel-key="'+selKey+'"]');
   if(panel){
     panel.querySelectorAll('.wager-preset').forEach(function(el){
@@ -6623,6 +6629,8 @@ async function settlePickemContest(contestId){
     try{ myPicks = JSON.parse(localStorage.getItem(lsKey)||'{}'); }catch{}
 
     let changed = false;
+
+    // ── Live settlement: games still in allGames ──────────────────────────
     Object.entries(myPicks).forEach(([gameId, pick]) => {
       if(gameId === '_name' || !pick || pick.result !== 'pending') return;
       const game = allGames.find(g => g.id === gameId);
@@ -6644,6 +6652,57 @@ async function settlePickemContest(contestId){
       pick.locked = true;
       changed = true;
     });
+
+    // ── Historical settlement: games that have left allGames ──────────────
+    // Fetch final scores from ESPN for any pending picks whose games are gone.
+    const pendingHistorical = Object.entries(myPicks).filter(([gid, pick]) =>
+      gid !== '_name' && pick && pick.result === 'pending' && pick.league &&
+      !allGames.find(g => g.id === gid)
+    );
+    if(pendingHistorical.length){
+      const groups = {};
+      pendingHistorical.forEach(([gid, pick]) => {
+        const lg = LEAGUES.find(l => l.league === pick.league);
+        if(!lg) return;
+        const ts = pick.pickedAt || Date.now();
+        const ymd = d => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+        [ts - 86400000*2, ts - 86400000, ts, ts + 86400000].map(t => ymd(new Date(t))).forEach(d => {
+          const key = `${lg.sport}|${lg.league}|${d}`;
+          if(!groups[key]) groups[key] = { lg, date: d, picks: {} };
+          groups[key].picks[gid] = pick;
+        });
+      });
+      const PROXY = ['https://corsproxy.io/?', 'https://api.allorigins.win/raw?url='];
+      for(const grp of Object.values(groups)){
+        const url = `${ESPN}/${grp.lg.sport}/${grp.lg.league}/scoreboard?dates=${grp.date}&limit=100`;
+        let data = null;
+        for(const prefix of ['', ...PROXY]){
+          try{
+            const res = await fetch(prefix ? prefix + encodeURIComponent(url) : url, {signal: AbortSignal.timeout(6000)});
+            if(res.ok){ data = await res.json(); break; }
+          }catch{}
+        }
+        if(!data?.events) continue;
+        (data.events || []).forEach(ev => {
+          const comp = ev?.competitions?.[0];
+          if(!comp || comp.status?.type?.state !== 'post') return;
+          const pick = grp.picks[ev.id];
+          if(!pick || pick.result !== 'pending') return;
+          const home = comp.competitors?.find(c => c.homeAway === 'home') || {};
+          const away = comp.competitors?.find(c => c.homeAway === 'away') || {};
+          const hs = parseInt(home.score), as2 = parseInt(away.score);
+          if(isNaN(hs) || isNaN(as2)) return;
+          const homeTeamName = home.team?.shortDisplayName || home.team?.displayName || '';
+          const pickedHome = pick.sideType === 'home' ||
+                             (homeTeamName && pick.side && homeTeamName === pick.side);
+          if(hs === as2)      pick.result = 'push';
+          else if(pickedHome) pick.result = hs > as2 ? 'correct' : 'wrong';
+          else                pick.result = as2 > hs ? 'correct' : 'wrong';
+          pick.locked = true;
+          changed = true;
+        });
+      }
+    }
 
     if(changed){
       localStorage.setItem(lsKey, JSON.stringify(myPicks));
@@ -6671,7 +6730,8 @@ async function contestPick(contestId,gameId,side){
   if(myPicks[gameId]&&myPicks[gameId].side===side){
     delete myPicks[gameId];
   } else {
-    myPicks[gameId]={side, sideType, result:'pending', locked:false, pickedAt:Date.now()};
+    // Store league so historical re-settlement can fetch the right ESPN scoreboard
+    myPicks[gameId]={side, sideType, result:'pending', locked:false, pickedAt:Date.now(), league: game?.league||null};
   }
   myPicks._name=currentUser.name;
   localStorage.setItem(lsKey,JSON.stringify(myPicks));
@@ -9709,7 +9769,9 @@ async function loadDailyChallenge(){
 
   // Try to pull live roster players so the challenge always uses real active players
   const lg = LEAGUES.find(l=>l.league===game.league);
-  let player = null, stat = 'Points', line = 24.5;
+  let player = null, playerId = null, stat = 'Points', line = 24.5;
+  // Maps human-readable stat label to the ESPN boxscore stat key used by checkPropPickResults
+  const CHALLENGE_STAT_KEY = { Points: 'pts', Assists: 'ast', Rebounds: 'reb' };
 
   if(lg){
     try{
@@ -9727,7 +9789,8 @@ async function loadDailyChallenge(){
         // Pick a player deterministically by date so it's stable for the whole day
         const seed = parseInt(todayKey().replace(/-/g,''))%allPlayers.length;
         const picked = allPlayers[seed];
-        player = picked.name;
+        player   = picked.name;
+        playerId = picked.id || null;  // store ESPN player ID for settlement matching
         // Use season avg to set a realistic line
         const pts = parseFloat(picked.stats?.pts) || 0;
         if(pts > 5){
@@ -9749,7 +9812,7 @@ async function loadDailyChallenge(){
     player = `${game.away.abbr||game.away.name} vs ${game.home.abbr||game.home.name} — Top Scorer`;
   }
 
-  return { gameId:game.id, player, stat, line, game:game.away.name+' @ '+game.home.name, league:game.leagueLabel };
+  return { gameId:game.id, player, playerId, stat, statKey: CHALLENGE_STAT_KEY[stat] || 'pts', line, game:game.away.name+' @ '+game.home.name, league:game.leagueLabel };
 }
 
 async function renderDailyChallenge(){
@@ -9790,7 +9853,7 @@ function makeDailyPick(side, challenge){
   // Toggle: if same side tapped again, remove the pick
   if(existing === side){
     localStorage.removeItem(savedKey);
-    picks = picks.filter(p => !(p.gameId === challenge.gameId && p.type === 'prop' && p._isChallenge));
+    picks = picks.filter(p => !p._isChallenge);
     savePicks();
     renderDailyChallenge();
     return;
@@ -9801,13 +9864,15 @@ function makeDailyPick(side, challenge){
 
   const desc = `${challenge.player} ${challenge.stat} ${side==='over'?'O':'U'} ${challenge.line}`;
 
-  // Remove any existing challenge pick for this game (e.g. switching sides)
-  picks = picks.filter(p => !(p.gameId === challenge.gameId && p.type === 'prop' && p._isChallenge));
+  // Remove any existing challenge pick (e.g. switching sides)
+  picks = picks.filter(p => !p._isChallenge);
 
-  // Use the real gameId so settlement can actually match the game.
-  // _isChallenge flag identifies these picks for cleanup.
+  // Use composite pick key (same format as makePropPick) so checkPropPickResults can match it.
+  // actualGameId holds the real ESPN game ID for boxscore lookups at settlement time.
+  const _challengeKey = `prop_${challenge.gameId}_${challenge.playerId||'ch'}_${challenge.statKey||'pts'}`;
   picks.push({
-    gameId: challenge.gameId,
+    gameId: _challengeKey,
+    actualGameId: challenge.gameId,
     type: 'prop', side,
     description: desc,
     gameStr: challenge.game,
@@ -9815,6 +9880,11 @@ function makeDailyPick(side, challenge){
     league: challenge.league,
     madeAt: Date.now(),
     wager: DEFAULT_WAGER, odds: -110,
+    playerId: challenge.playerId || null,
+    statKey:  challenge.statKey  || 'pts',
+    playerName: challenge.player,
+    statLabel:  challenge.stat,
+    line: challenge.line,
     _isChallenge: true,
   });
   savePicks();
