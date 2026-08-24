@@ -12787,10 +12787,11 @@ function toggleDesktopMoreDropdown(){
     { label:'👥 Feed',       mode:'feed' },
     { label:'📈 Trends',     mode:'trends' },
     { label:'📅 Calendar',   mode:'calendar' },
+    { label:'🏆 Leagues',    mode:'leaderboard', tab:'leagues' },
   ];
 
   dropdown.innerHTML = items.map(item =>
-    `<button onclick="setMode('${item.mode}');document.getElementById('desktopMoreDropdown')?.remove()" style="
+    `<button onclick="setMode('${item.mode}');${item.tab?`switchLbTab('${item.tab}');`:''} document.getElementById('desktopMoreDropdown')?.remove()" style="
       display:block;width:100%;text-align:left;padding:10px 14px;
       background:none;border:none;color:var(--text);cursor:pointer;
       font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.5px;
