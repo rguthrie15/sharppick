@@ -1898,7 +1898,6 @@ function applyUser(){
   setTimeout(updateBankrollUI, 100);
   if(typeof startServerSync==='function') startServerSync();
   if(typeof checkOnboarding==='function') setTimeout(checkOnboarding, 1200);
-  if(typeof scheduleDailyDigest==='function') setTimeout(scheduleDailyDigest, 5000);
   // Schedule pre-game reminders for existing picks
   setTimeout(()=>{ try{ schedulePreGameReminders(); }catch(e){ console.warn('[Push] pregame reminder err:', e?.message); } }, 3000);
   if(typeof scheduleWeeklyRecapPush==='function') setTimeout(scheduleWeeklyRecapPush, 3000);
@@ -6852,28 +6851,32 @@ async function fetchMyLeagues(){
 
 async function fetchLeagueStandings(leagueId){
   try{
-    // Get all members
     const members = await sbSelect('league_members',
       `league_id=eq.${leagueId}&select=user_id,user_name`);
     if(!members||!members.length) return [];
-    // Get their leaderboard entries
     const ids = members.map(m=>`"${m.user_id}"`).join(',');
-    const entries = await sbSelect('leaderboard',
-      `user_id=in.(${ids})&select=*`);
-    // Merge with member list (some may have no picks yet)
+    const entries = await sbSelect('user_ratings',
+      `user_id=in.(${ids})&select=user_id,sharp_rating_90,all_time_singles,picks_90,win_rate_90,roi_90`);
     return members.map(m=>{
-      const lb = (entries||[]).find(e=>e.user_id===m.user_id);
+      const ur = (entries||[]).find(e=>e.user_id===m.user_id);
+      // Parse "W-L-P" from all_time_singles
+      const parts = (ur?.all_time_singles||'0-0-0').split('-').map(Number);
+      const w = parts[0]||0, l = parts[1]||0, p = parts[2]||0;
       return {
         id: m.user_id,
         name: m.user_name,
-        w: lb?.w||0, l: lb?.l||0, p: lb?.p||0, total: lb?.total||0,
-        recentPicks: lb?.recent_picks||[],
+        w, l, p,
+        total: w+l+p,
+        sharpRating: ur?.sharp_rating_90||0,
+        winRate: ur?.win_rate_90||0,
+        roi: ur?.roi_90||0,
+        picks90: ur?.picks_90||0,
+        recentPicks: [],
       };
     }).sort((a,b)=>{
-      const ap=(a.w+a.l)>0?a.w/(a.w+a.l):0;
-      const bp=(b.w+b.l)>0?b.w/(b.w+b.l):0;
-      if(Math.abs(ap-bp)>0.001) return bp-ap;
-      return (b.w+b.l)-(a.w+a.l);
+      // Primary: sharp rating; secondary: total picks (more data = more reliable)
+      if(Math.abs(a.sharpRating-b.sharpRating)>0.1) return b.sharpRating-a.sharpRating;
+      return b.total-a.total;
     });
   }catch(e){ console.warn('fetchLeagueStandings failed:',e.message); return []; }
 }
@@ -6994,7 +6997,7 @@ async function renderLeagueDetail(leagueId){
     </div>
 
     <div class="lb-subtitle" style="margin-bottom:10px;padding:0 4px">
-      ${standings.length} MEMBER${standings.length!==1?'S':''} · RANKED BY WIN %
+      ${standings.length} MEMBER${standings.length!==1?'S':''} · RANKED BY SHARP RATING
     </div>
 
     <div class="lb-table-wrap">
@@ -7006,7 +7009,7 @@ async function renderLeagueDetail(leagueId){
           <th class="num">W</th>
           <th class="num">L</th>
           <th class="num">WIN %</th>
-          <th class="lb-bar-cell"></th>
+          <th class="num">SR</th>
         </tr>
       </thead>
       <tbody>
@@ -7014,6 +7017,7 @@ async function renderLeagueDetail(leagueId){
           const isMe = entry.id===meId;
           const decided = entry.w+entry.l;
           const pct = decided>0?Math.round(entry.w/decided*100):0;
+          const sr = entry.sharpRating>0?Math.round(entry.sharpRating):'—';
           return `<tr class="lb-row ${isMe?'me':''} ${i<3?'rank-'+(i+1):''}">
             <td class="lb-cell lb-rank">${rankIcon(i)}</td>
             <td class="lb-cell">
@@ -7028,9 +7032,7 @@ async function renderLeagueDetail(leagueId){
             <td class="lb-cell num lb-w">${entry.w}</td>
             <td class="lb-cell num lb-l">${entry.l}</td>
             <td class="lb-cell num"><span class="lb-pct">${decided>0?pct+'%':'—'}</span></td>
-            <td class="lb-cell lb-bar-cell">
-              <div class="lb-bar-wrap"><div class="lb-bar" style="width:${pct}%"></div></div>
-            </td>
+            <td class="lb-cell num"><span class="lb-pct">${sr}</span></td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -7713,25 +7715,81 @@ async function manualSettleParlay(pickIdx){
 // BEST BET OF THE DAY
 // ═══════════════════════════════════════════════════════
 function computeBestBet(){
-  // Find the game with most public picks (from pick_trends) or biggest line mover
   const pregames = allGames.filter(g=>g.isPre&&(g.odds.spread||g.odds.total));
   if(!pregames.length) return null;
 
-  // Score each game: line movement + has odds
   let best = null, bestScore = -1;
   pregames.forEach(g=>{
     let score = 0;
-    // Bonus for line movement
+
+    // Line movement: score by magnitude of spread movement
     const hist = oddsHistory[g.id];
-    if(hist&&hist.length>1) score+=10;
+    if(hist&&hist.length>1){
+      const first = parseFloat(hist[0]?.spread);
+      const last  = parseFloat(hist[hist.length-1]?.spread);
+      if(!isNaN(first)&&!isNaN(last)){
+        const moved = Math.abs(last-first);
+        score += Math.min(moved*4, 20); // up to 20 pts for 5+ pt move
+      } else {
+        score += 5; // has history but can't parse magnitude
+      }
+    }
+
+    // Public consensus divergence: if public heavily on one side but line moved other way = sharp fade
+    const trends = cachedTrends&&cachedTrends[g.id];
+    if(trends){
+      const awayPct = parseFloat(trends.awayPct||trends.away_pct||0);
+      const homePct = parseFloat(trends.homePct||trends.home_pct||0);
+      const maxPct  = Math.max(awayPct, homePct);
+      if(maxPct>=65) score+=8;  // strong public lean
+      if(maxPct>=75) score+=6;  // very lopsided — fade candidate
+    }
+
     // Bonus for having both spread and total
     if(g.odds.spread&&g.odds.total) score+=5;
-    // Bonus for bigger games (by league priority)
+
+    // League priority
     const topLeagues=['NBA','NFL','MLB','NHL'];
     if(topLeagues.some(l=>g.leagueLabel.includes(l))) score+=3;
+
     if(score>bestScore){ bestScore=score; best=g; }
   });
   return best;
+}
+
+function _bestBetReason(g){
+  const hist = oddsHistory[g.id];
+  const trends = cachedTrends&&cachedTrends[g.id];
+
+  let lineMoved = false, moveDir = '', movePts = 0;
+  if(hist&&hist.length>1){
+    const first = parseFloat(hist[0]?.spread);
+    const last  = parseFloat(hist[hist.length-1]?.spread);
+    if(!isNaN(first)&&!isNaN(last)&&Math.abs(last-first)>=0.5){
+      lineMoved = true;
+      movePts   = Math.abs(last-first);
+      moveDir   = last<first ? g.away.name : g.home.name;
+    }
+  }
+
+  let publicLean = null, leanPct = 0, leanSide = '';
+  if(trends){
+    const awayPct = parseFloat(trends.awayPct||trends.away_pct||0);
+    const homePct = parseFloat(trends.homePct||trends.home_pct||0);
+    if(awayPct>=60){ publicLean=true; leanPct=Math.round(awayPct); leanSide=g.away.name; }
+    else if(homePct>=60){ publicLean=true; leanPct=Math.round(homePct); leanSide=g.home.name; }
+  }
+
+  if(lineMoved&&publicLean&&moveDir&&moveDir!==leanSide){
+    return `${leanPct}% of public on ${leanSide}, but the line moved toward ${moveDir} — sharp money fading the public`;
+  }
+  if(lineMoved&&movePts>=1){
+    return `Line has moved ${movePts>0?movePts.toFixed(1):''} pts toward ${moveDir||'favorite'} since open — sharp action detected`;
+  }
+  if(publicLean){
+    return `${leanPct}% of public backing ${leanSide} — significant consensus on this matchup`;
+  }
+  return `Top game on today's slate — ${g.leagueLabel} matchup with posted spread and total`;
 }
 
 // (hoisted to early globals)
@@ -7756,10 +7814,7 @@ function renderBestBetCard(){
 
   const g=computeBestBet();
   if(!g){ el.innerHTML=''; return; }
-  const hist=oddsHistory[g.id];
-  const reason=hist&&hist.length>1
-    ? `Line has moved since open — sharp action detected`
-    : `Top game on today's slate`;
+  const reason=_bestBetReason(g);
   el.innerHTML=`<div class="best-bet-card" onclick="openGame('${g.id}')">
     <div class="best-bet-badge">⭐ BEST BET OF THE DAY <span style="color:var(--muted)">· ${g.leagueLabel}</span></div>
     <div class="best-bet-game">${g.away.name} @ ${g.home.name}</div>
@@ -13185,43 +13240,6 @@ function closeSearchAndMode(mode) {
   setMode(mode);
 }
 
-// ═══════════════════════════════════════════════════════
-// DAILY DIGEST NOTIFICATION
-// ═══════════════════════════════════════════════════════
-function scheduleDailyDigest() {
-  if(pushPermission !== 'granted') return;
-  const now = new Date();
-  const sentKey = `digest_sent_${now.toISOString().slice(0,10)}`;
-  if(localStorage.getItem(sentKey)) return;
-
-  const hour = now.getHours();
-  // Send between 9-11am local time
-  if(hour < 9 || hour > 11) return;
-
-  localStorage.setItem(sentKey, '1');
-
-  // Build digest message
-  const todayGames = allGames.filter(g => g.isPre || g.isLive);
-  const pendingPicks = picks.filter(p => p.result === 'pending');
-  const bankroll = computeBankroll();
-  const pnl = bankroll - STARTING_BANKROLL;
-  const streak = calcPickStats(picks);
-
-  let title = '📊 SharpPick Daily Briefing';
-  let body = '';
-
-  if(todayGames.length && pendingPicks.length) {
-    body = `${todayGames.length} games today · ${pendingPicks.length} picks live · $${Math.round(bankroll).toLocaleString()} bankroll`;
-  } else if(todayGames.length) {
-    body = `${todayGames.length} games on today's slate · Bankroll: $${Math.round(bankroll).toLocaleString()}${pnl!==0?' ('+((pnl>0?'+':'')+'$'+Math.round(pnl))+')':''}`;
-  } else {
-    body = `Bankroll: $${Math.round(bankroll).toLocaleString()} · ${streak.curStreak>1?streak.curStreak+'-pick win streak · ':''}Check today's slate`;
-  }
-
-  if(streak.curStreak >= 3) title = `🔥 ${streak.curStreak}-pick streak! · ${title}`;
-
-  sendPushNotification(title, body, 'daily-digest');
-}
 
 // ═══════════════════════════════════════════════════════
 // IMPROVED EMPTY STATES
